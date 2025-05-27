@@ -55,10 +55,11 @@ def inicializar_banco_dados():
         endereco TEXT NOT NULL,
         quartos INTEGER,
         banheiros INTEGER,
+        plataforma TEXT,  
         FOREIGN KEY (cliente_id) REFERENCES clientes (id)
     );
     """)
-    
+        
     # Tabela de serviços de limpeza
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS limpezas (
@@ -84,26 +85,28 @@ def inicializar_banco_dados():
     );
     """)
     
+    # Tabela de tipos de enxoval 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tipos_enxoval (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        preco_unitario REAL DEFAULT 0.0,
+        unidade_medida TEXT DEFAULT 'unidade',
+        data_cadastro DATE DEFAULT CURRENT_DATE
+    )
+    """)
+    
     # Tabela de consumo de enxoval
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS consumo_enxoval (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        imovel_id INTEGER,
-        item_id INTEGER,
+        imovel_id INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        quantidade INTEGER NOT NULL,
         data DATE NOT NULL,
-        quantidade INTEGER DEFAULT 1,
-        FOREIGN KEY (imovel_id) REFERENCES imoveis (id),
-        FOREIGN KEY (item_id) REFERENCES tipos_enxoval (id)
-    );
-    """)
-    
-    # Tabela de suprimentos
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS suprimentos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        preco_unitario REAL DEFAULT 0.0
-    );
+        FOREIGN KEY (imovel_id) REFERENCES imoveis(id),
+        FOREIGN KEY (item_id) REFERENCES tipos_enxoval(id)
+    )
     """)
     
     # Tabela de reposição de suprimentos
@@ -573,49 +576,50 @@ class SistemaGestaoApp:
         self.gerar_grafico_enxoval()
         
         conn.close()
-    
     def gerar_grafico_limpezas(self):
-        """Gera gráfico de limpezas por dia"""
+        """Atualiza o gráfico de limpezas diretamente no canvas"""
         conn = sqlite3.connect("sistema.db")
         cursor = conn.cursor()
-        
+
         cursor.execute("""
-            SELECT date(data), COUNT(*), SUM(valor_total)
+            SELECT date(data), COUNT(*)
             FROM limpezas
             WHERE date(data) >= date('now', '-30 days')
             GROUP BY date(data)
             ORDER BY date(data)
         """)
-        
+
         datas = []
         quantidades = []
-        valores = []
-        
+
         for row in cursor.fetchall():
             datas.append(row[0][5:])  # Mostrar apenas dia/mês
             quantidades.append(row[1])
-            valores.append(row[2])
-        
-        fig, ax = plt.subplots(figsize=(6, 3))
-        ax.bar(datas, quantidades, color=COR_DESTAQUE)
-        ax.set_title('Limpezas por Dia (últimos 30 dias)')
+
+        # Limpar gráfico anterior
+        fig = self.canvas_grafico1.figure
+        fig.clear()
+        ax = fig.add_subplot(111)
+
+        # Gráfico moderno
+        ax.plot(datas, quantidades, marker='o', linestyle='-', color=COR_DESTAQUE, linewidth=2)
+        ax.fill_between(datas, quantidades, color=COR_DESTAQUE, alpha=0.2)
+        ax.set_title('Limpezas nos Últimos 30 Dias', fontsize=10)
         ax.set_ylabel('Quantidade')
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        # Salvar e exibir no canvas
-        caminho = "grafico_limpezas.png"
-        plt.savefig(caminho, dpi=80)
-        plt.close()
-        
-        self.exibir_imagem_no_canvas(caminho, self.canvas_grafico1)
+        ax.tick_params(axis='x', rotation=45, labelsize=8)
+        fig.patch.set_facecolor(COR_CARD)
+        ax.set_facecolor("#FFFFFF")
+        ax.grid(True, linestyle="--", alpha=0.3)
+
+        self.canvas_grafico1.draw()
         conn.close()
+
     
     def gerar_grafico_enxoval(self):
-        """Gera gráfico de itens de enxoval mais utilizados"""
+        """Atualiza o gráfico de enxoval diretamente no canvas"""
         conn = sqlite3.connect("sistema.db")
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT t.nome, SUM(c.quantidade)
             FROM consumo_enxoval c
@@ -625,28 +629,30 @@ class SistemaGestaoApp:
             ORDER BY SUM(c.quantidade) DESC
             LIMIT 5
         """)
-        
+
         itens = []
         quantidades = []
-        
+
         for row in cursor.fetchall():
             itens.append(row[0])
             quantidades.append(row[1])
-        
-        fig, ax = plt.subplots(figsize=(6, 3))
-        ax.barh(itens, quantidades, color=COR_SECUNDARIA)
-        ax.set_title('Itens Mais Utilizados (últimos 30 dias)')
+
+        fig = self.canvas_grafico2.figure
+        fig.clear()
+        ax = fig.add_subplot(111)
+
+        # Gráfico de barras horizontal moderno
+        bars = ax.barh(itens, quantidades, color=COR_SECUNDARIA)
+        ax.set_title('Itens Mais Utilizados', fontsize=10)
         ax.set_xlabel('Quantidade')
-        plt.tight_layout()
-        
-        # Salvar e exibir no canvas
-        caminho = "grafico_enxoval.png"
-        plt.savefig(caminho, dpi=80)
-        plt.close()
-        
-        self.exibir_imagem_no_canvas(caminho, self.canvas_grafico2)
+        fig.patch.set_facecolor(COR_CARD)
+        ax.set_facecolor("#FFFFFF")
+        ax.grid(True, axis='x', linestyle="--", alpha=0.3)
+        ax.bar_label(bars, fmt='%d', label_type='edge', padding=3)
+
+        self.canvas_grafico2.draw()
         conn.close()
-    
+
     def exibir_imagem_no_canvas(self, caminho_imagem, canvas):
         from PIL import Image, ImageTk
 
@@ -682,61 +688,110 @@ class SistemaGestaoApp:
     # =============================================
     
     def criar_clientes(self):
-        """Cria a interface para gestão de clientes"""
+        """Cria a interface para gestão de clientes com layout moderno"""
         self.frame_clientes = Frame(self.frame_conteudo, bg=COR_FUNDO)
         
-        # Treeview para listar clientes
+        # === Treeview para listar clientes ===
         frame_tree = Frame(self.frame_clientes, bg=COR_FUNDO)
-        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=(10, 5))
         
         scrollbar = Scrollbar(frame_tree)
         scrollbar.pack(side=RIGHT, fill=Y)
         
-        self.tree_clientes = ttk.Treeview(frame_tree, columns=('id', 'nome', 'telefone', 'email'), 
-                                        yscrollcommand=scrollbar.set)
+        self.tree_clientes = ttk.Treeview(
+            frame_tree, 
+            columns=('nome', 'telefone', 'email'),
+            yscrollcommand=scrollbar.set,
+            show='headings',  # Remove a coluna #0 (desnecessária)
+            height=10
+        )
         self.tree_clientes.pack(fill=BOTH, expand=True)
         scrollbar.config(command=self.tree_clientes.yview)
+
+        self.tree_clientes.heading('nome', text='Nome')
+        self.tree_clientes.heading('telefone', text='Telefone')
+        self.tree_clientes.heading('email', text='Email')
         
-        self.tree_clientes.heading('#0', text='ID')
-        self.tree_clientes.heading('#1', text='Nome')
-        self.tree_clientes.heading('#2', text='Telefone')
-        self.tree_clientes.heading('#3', text='Email')
+        self.tree_clientes.column('nome', width=150)
+        self.tree_clientes.column('telefone', width=100)
+        self.tree_clientes.column('email', width=200)
+
+        # === Formulário de Cadastro ===
+        frame_form = Frame(
+            self.frame_clientes,
+            bg=COR_CARD,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#e0e0e0"
+        )
+        frame_form.pack(fill=X, padx=10, pady=(5, 10))
         
-        # Formulário para adicionar/editar clientes
-        frame_form = Frame(self.frame_clientes, bg=COR_CARD, bd=0, 
-                         highlightthickness=1, highlightbackground="#e0e0e0")
-        frame_form.pack(fill=X, padx=10, pady=10)
+        Label(
+            frame_form,
+            text="Cadastro de Clientes",
+            bg=COR_CARD,
+            fg=COR_TEXTO,
+            font=self.fonte_titulo
+        ).pack(pady=(10, 15), anchor="w", padx=10)
         
-        Label(frame_form, text="Cadastro de Clientes", bg=COR_CARD, 
-              fg=COR_TEXTO, font=self.fonte_titulo).pack(pady=(10, 5), anchor="w", padx=10)
-        
-        # Campos do formulário
-        campos = [
-            ("Nome:", Entry(frame_form)),
-            ("Telefone:", Entry(frame_form)),
-            ("Email:", Entry(frame_form)),
-            ("Endereço:", Entry(frame_form))
+        # Campos do formulário em uma grade
+        form_grid = Frame(frame_form, bg=COR_CARD)
+        form_grid.pack(fill=X, padx=10)
+
+        labels = ["Nome:", "Telefone:", "Email:", "Endereço:"]
+        self.entry_cliente_nome = Entry(form_grid)
+        self.entry_cliente_telefone = Entry(form_grid)
+        self.entry_cliente_email = Entry(form_grid)
+        self.entry_cliente_endereco = Entry(form_grid)
+        entries = [
+            self.entry_cliente_nome,
+            self.entry_cliente_telefone,
+            self.entry_cliente_email,
+            self.entry_cliente_endereco
         ]
         
-        self.entry_cliente_nome = campos[0][1]
-        self.entry_cliente_telefone = campos[1][1]
-        self.entry_cliente_email = campos[2][1]
-        self.entry_cliente_endereco = campos[3][1]
-        
-        for texto, widget in campos:
-            frame = Frame(frame_form, bg=COR_CARD)
-            frame.pack(fill=X, padx=10, pady=5)
-            Label(frame, text=texto, bg=COR_CARD).pack(side=LEFT, padx=5)
-            widget.pack(side=LEFT, expand=True, fill=X)
-        
-        # Botões
+        for i, (label, entry) in enumerate(zip(labels, entries)):
+            Label(
+                form_grid, text=label,
+                bg=COR_CARD,
+                anchor="w"
+            ).grid(row=i, column=0, sticky="w", padx=5, pady=5)
+            
+            entry.grid(row=i, column=1, sticky="ew", padx=5, pady=5)
+
+        form_grid.columnconfigure(1, weight=1)
+
+        # === Botões ===
         frame_botoes = Frame(frame_form, bg=COR_CARD)
-        frame_botoes.pack(fill=X, padx=10, pady=10)
+        frame_botoes.pack(fill=X, padx=10, pady=(10, 15))
         
-        Button(frame_botoes, text="Adicionar", command=self.adicionar_cliente,
-              bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
-        Button(frame_botoes, text="Limpar", command=self.limpar_form_cliente,
-              bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
+        estilo_botao = {
+            "width": 12,
+            "padx": 10,
+            "pady": 5,
+            "bd": 0,
+            "font": ("Arial", 10, "bold"),
+            "activebackground": "#cccccc"
+        }
+
+        Button(
+            frame_botoes,
+            text="Adicionar",
+            command=self.adicionar_cliente,
+            bg=COR_DESTAQUE,
+            fg="white",
+            **estilo_botao
+        ).pack(side=LEFT, padx=(0, 10))
+
+        Button(
+            frame_botoes,
+            text="Limpar",
+            command=self.limpar_form_cliente,
+            bg=COR_SECUNDARIA,
+            fg="white",
+            **estilo_botao
+        ).pack(side=LEFT)
+
     
     def carregar_clientes(self):
         """Carrega os clientes no TreeView"""
@@ -787,60 +842,192 @@ class SistemaGestaoApp:
     # =============================================
     # MÓDULO IMÓVEIS
     # =============================================
-    
     def criar_imoveis(self):
-        """Cria a interface para gestão de imóveis"""
+        """Cria a interface para gestão de imóveis com visual moderno"""
         self.frame_imoveis = Frame(self.frame_conteudo, bg=COR_FUNDO)
         
-        # Treeview (similar ao exemplo anterior)
+        # === Treeview para listar imóveis ===
+        frame_tree = Frame(self.frame_imoveis, bg=COR_FUNDO)
+        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=(10, 5))
+
+        scrollbar = Scrollbar(frame_tree)
+        scrollbar.pack(side=RIGHT, fill=Y)
+
+        self.tree_imoveis = ttk.Treeview(
+            frame_tree,
+            columns=('id', 'cliente', 'endereco', 'quartos', 'banheiros', 'plataforma'),
+            show='headings',
+            yscrollcommand=scrollbar.set,
+            height=10
+        )
+        self.tree_imoveis.pack(fill=BOTH, expand=True)
+        scrollbar.config(command=self.tree_imoveis.yview)
+
+        # Esconder a coluna 'id' que usaremos apenas para referência
+        self.tree_imoveis.column('id', width=0, stretch=NO)
+        self.tree_imoveis.heading('id', text='ID')
+
+        colunas = {
+            'cliente': 'Cliente',
+            'endereco': 'Endereço',
+            'quartos': 'Quartos',
+            'banheiros': 'Banheiros',
+            'plataforma': 'Plataforma'
+        }
+
+        for col, nome in colunas.items():
+            self.tree_imoveis.heading(col, text=nome)
+            self.tree_imoveis.column(col, anchor='center', width=120)
+
+        # Conecta o clique duplo para abrir edição do imóvel
+        self.tree_imoveis.bind("<Double-1>", self.abrir_janela_edicao_imovel)
+
+        # === Formulário de Cadastro de Imóveis ===
+        frame_form = Frame(
+            self.frame_imoveis,
+            bg=COR_CARD,
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#e0e0e0"
+        )
+        frame_form.pack(fill=X, padx=10, pady=(5, 10))
         
-        # Formulário compacto
-        frame_form = Frame(self.frame_imoveis, bg=COR_CARD, bd=1, relief=SOLID)
-        frame_form.pack(fill=X, padx=5, pady=5)
-        
-        Label(frame_form, text="Cadastro de Imóveis", bg=COR_CARD, 
-            fg=COR_TEXTO, font=self.fonte_pequena).grid(row=0, column=0, columnspan=2, sticky='w', pady=(5, 0))
-        
-        # Cliente
-        Label(frame_form, text="Cliente:", bg=COR_CARD, font=self.fonte_pequena).grid(
-            row=1, column=0, sticky='e', padx=2, pady=1)
-        
-        self.combo_cliente_imovel = ttk.Combobox(frame_form, width=28, font=self.fonte_pequena)
-        self.combo_cliente_imovel.grid(row=1, column=1, sticky='we', padx=2, pady=1)
-        
-        # Outros campos
-        campos = [
-            ("Endereço:", Entry(frame_form, width=30, font=self.fonte_pequena)),
-            ("Quartos:", Entry(frame_form, width=5, font=self.fonte_pequena)),
-            ("Banheiros:", Entry(frame_form, width=5, font=self.fonte_pequena))
-        ]
-        
-        for i, (texto, widget) in enumerate(campos, start=2):
-            Label(frame_form, text=texto, bg=COR_CARD, font=self.fonte_pequena).grid(
-                row=i, column=0, sticky='e', padx=2, pady=1)
-            widget.grid(row=i, column=1, sticky='w', padx=2, pady=1)
-        
-        self.entry_imovel_endereco, self.entry_imovel_quartos, self.entry_imovel_banheiros = [c[1] for c in campos]
-        
-        # Botões
+        Label(
+            frame_form,
+            text="Cadastro de Imóveis",
+            bg=COR_CARD,
+            fg=COR_TEXTO,
+            font=self.fonte_titulo
+        ).pack(pady=(10, 15), anchor="w", padx=10)
+
+        form_grid = Frame(frame_form, bg=COR_CARD)
+        form_grid.pack(fill=X, padx=10)
+
+        # Cliente (Combobox)
+        Label(form_grid, text="Cliente:", bg=COR_CARD, anchor="w", font=self.fonte_pequena).grid(
+            row=0, column=0, sticky='w', padx=5, pady=5)
+        self.combo_cliente_imovel = ttk.Combobox(form_grid, font=self.fonte_pequena)
+        self.combo_cliente_imovel.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+
+        # Endereço
+        Label(form_grid, text="Endereço:", bg=COR_CARD, anchor="w", font=self.fonte_pequena).grid(
+            row=1, column=0, sticky='w', padx=5, pady=5)
+        self.entry_imovel_endereco = Entry(form_grid, font=self.fonte_pequena)
+        self.entry_imovel_endereco.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+
+        # Quartos
+        Label(form_grid, text="Quartos:", bg=COR_CARD, anchor="w", font=self.fonte_pequena).grid(
+            row=2, column=0, sticky='w', padx=5, pady=5)
+        self.entry_imovel_quartos = Entry(form_grid, font=self.fonte_pequena)
+        self.entry_imovel_quartos.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+
+        # Banheiros
+        Label(form_grid, text="Banheiros:", bg=COR_CARD, anchor="w", font=self.fonte_pequena).grid(
+            row=3, column=0, sticky='w', padx=5, pady=5)
+        self.entry_imovel_banheiros = Entry(form_grid, font=self.fonte_pequena)
+        self.entry_imovel_banheiros.grid(row=3, column=1, sticky='ew', padx=5, pady=5)
+
+        # Plataforma
+        Label(form_grid, text="Plataforma:", bg=COR_CARD, anchor="w", font=self.fonte_pequena).grid(
+            row=4, column=0, sticky='w', padx=5, pady=5)
+        self.entry_imovel_plataforma = Entry(form_grid, font=self.fonte_pequena)
+        self.entry_imovel_plataforma.grid(row=4, column=1, sticky='ew', padx=5, pady=5)
+
+        form_grid.columnconfigure(1, weight=1)
+
+        # === Botões ===
         frame_botoes = Frame(frame_form, bg=COR_CARD)
-        frame_botoes.grid(row=len(campos)+2, column=0, columnspan=2, pady=3)
+        frame_botoes.pack(fill=X, padx=10, pady=(10, 15))
         
-        Button(frame_botoes, text="Adicionar", command=self.adicionar_imovel,
-            bg=COR_DESTAQUE, fg="white", font=self.fonte_pequena, padx=5).pack(side=LEFT, padx=2)
-        Button(frame_botoes, text="Limpar", command=self.limpar_form_imovel,
-            bg=COR_SECUNDARIA, fg="white", font=self.fonte_pequena, padx=5).pack(side=LEFT, padx=2)
+        estilo_botao = {
+            "width": 12,
+            "padx": 10,
+            "pady": 5,
+            "bd": 0,
+            "font": ("Arial", 10, "bold"),
+            "activebackground": "#cccccc"
+        }
+
+        Button(
+            frame_botoes,
+            text="Adicionar",
+            command=self.adicionar_imovel,
+            bg=COR_DESTAQUE,
+            fg="white",
+            **estilo_botao
+        ).pack(side=LEFT, padx=(0, 10))
+
+        Button(
+            frame_botoes,
+            text="Limpar",
+            command=self.limpar_form_imovel,
+            bg=COR_SECUNDARIA,
+            fg="white",
+            **estilo_botao
+        ).pack(side=LEFT)
         
-        frame_form.columnconfigure(1, weight=1)
+        # Carregar os imóveis do banco de dados
+        self.carregar_imoveis()
 
+    def adicionar_imovel(self):
+        """Adiciona um imóvel ao banco de dados e atualiza a Treeview"""
+        cliente = self.combo_cliente_imovel.get().strip()
+        endereco = self.entry_imovel_endereco.get().strip()
+        quartos = self.entry_imovel_quartos.get().strip()
+        banheiros = self.entry_imovel_banheiros.get().strip()
+        plataforma = self.entry_imovel_plataforma.get().strip()
 
+        # Validação simples
+        if not (cliente and endereco and quartos and banheiros and plataforma):
+            messagebox.showwarning("Campos obrigatórios", "Por favor, preencha todos os campos.")
+            return
+
+        try:
+            # Extrai o ID do cliente do combobox (formato "ID - Nome")
+            cliente_id = int(cliente.split(' - ')[0])
+            quartos = int(quartos)
+            banheiros = int(banheiros)
+        except (ValueError, IndexError):
+            messagebox.showerror("Erro de entrada", "Verifique os dados inseridos.")
+            return
+
+        # Inserir no banco de dados
+        conn = sqlite3.connect("sistema.db")
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO imoveis 
+                (cliente_id, endereco, quartos, banheiros, plataforma)
+                VALUES (?, ?, ?, ?, ?)
+            """, (cliente_id, endereco, quartos, banheiros, plataforma))
+            conn.commit()
+        except sqlite3.Error as e:
+            messagebox.showerror("Erro no banco de dados", f"Não foi possível salvar o imóvel:\n{str(e)}")
+        finally:
+            conn.close()
+
+        # Recarregar a lista de imóveis
+        self.carregar_imoveis()
+        
+        # Limpar formulário
+        self.limpar_form_imovel()
+        
+        messagebox.showinfo("Sucesso", "Imóvel cadastrado com sucesso!")
 
     def carregar_imoveis(self):
         """Carrega os imóveis no TreeView e atualiza o combobox de clientes"""
         conn = sqlite3.connect("sistema.db")
         cursor = conn.cursor()
         
-        # Carregar clientes no combobox
+        # Verifica se a coluna plataforma existe e a adiciona se necessário
+        cursor.execute("PRAGMA table_info(imoveis)")
+        colunas = [col[1] for col in cursor.fetchall()]
+        if 'plataforma' not in colunas:
+            cursor.execute("ALTER TABLE imoveis ADD COLUMN plataforma TEXT")
+            conn.commit()
+        
+        # Restante do código permanece o mesmo...
         cursor.execute("SELECT id, nome FROM clientes")
         clientes = cursor.fetchall()
         self.combo_cliente_imovel['values'] = [f"{c[0]} - {c[1]}" for c in clientes]
@@ -848,59 +1035,110 @@ class SistemaGestaoApp:
         if clientes:
             self.combo_cliente_imovel.current(0)
         
-        # Carregar imóveis no treeview
         cursor.execute("""
-            SELECT i.id, c.nome, i.endereco, i.quartos, i.banheiros
+            SELECT i.id, c.nome, i.endereco, i.quartos, i.banheiros, 
+                COALESCE(i.plataforma, '') as plataforma
             FROM imoveis i
             JOIN clientes c ON i.cliente_id = c.id
         """)
         
-        # Limpar treeview
         for item in self.tree_imoveis.get_children():
             self.tree_imoveis.delete(item)
         
-        # Adicionar novos itens
         for row in cursor.fetchall():
             self.tree_imoveis.insert('', 'end', values=row)
         
         conn.close()
-    
-    def adicionar_imovel(self):
-        """Adiciona um novo imóvel ao banco de dados"""
-        cliente_id = self.combo_cliente_imovel.get().split(" - ")[0]
-        endereco = self.entry_imovel_endereco.get()
-        quartos = self.entry_imovel_quartos.get()
-        banheiros = self.entry_imovel_banheiros.get()
-        
-        if cliente_id and endereco:
-            try:
-                quartos = int(quartos) if quartos else 0
-                banheiros = int(banheiros) if banheiros else 0
-                
-                conn = sqlite3.connect("sistema.db")
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO imoveis (cliente_id, endereco, quartos, banheiros)
-                    VALUES (?, ?, ?, ?)
-                """, (cliente_id, endereco, quartos, banheiros))
-                conn.commit()
-                conn.close()
-                
-                messagebox.showinfo("Sucesso", "Imóvel cadastrado com sucesso!")
-                self.carregar_imoveis()
-                self.limpar_form_imovel()
-            except ValueError:
-                messagebox.showerror("Erro", "Quartos e banheiros devem ser números inteiros")
-        else:
-            messagebox.showerror("Erro", "Informe pelo menos o cliente e o endereço")
-    
+
     def limpar_form_imovel(self):
-        """Limpa o formulário de imóveis"""
-        self.entry_imovel_endereco.delete(0, END)
-        self.entry_imovel_quartos.delete(0, END)
-        self.entry_imovel_banheiros.delete(0, END)
+            """Limpa o formulário de imóveis"""
+            self.combo_cliente_imovel.set('')  # Limpa o combobox
+            self.entry_imovel_endereco.delete(0, END)
+            self.entry_imovel_quartos.delete(0, END)
+            self.entry_imovel_banheiros.delete(0, END)
+            self.entry_imovel_plataforma.delete(0, END)
+
+    def abrir_janela_edicao_imovel(self, event):
+        """Abre uma janela para editar o imóvel selecionado"""
+        # Pega o item selecionado na Treeview
+        item_selecionado = self.tree_imoveis.selection()
+        if not item_selecionado:
+            return  # Nada selecionado, sai da função
+        
+        item = item_selecionado[0]
+        dados = self.tree_imoveis.item(item, "values")
+        
+        # Cria a janela de edição
+        janela_edicao = Toplevel()
+        janela_edicao.title("Editar Imóvel")
+        janela_edicao.resizable(False, False)
+        
+        # Frame principal
+        frame_principal = Frame(janela_edicao, padx=20, pady=20)
+        frame_principal.pack()
+        
+        # Variáveis para os campos
+        var_endereco = StringVar(value=dados[2])
+        var_quartos = StringVar(value=dados[3])
+        var_banheiros = StringVar(value=dados[4])
+        var_plataforma = StringVar(value=dados[5])
+        
+        # Campos do formulário
+        Label(frame_principal, text="Endereço:").grid(row=0, column=0, sticky='w', pady=5)
+        Entry(frame_principal, textvariable=var_endereco, width=40).grid(row=0, column=1, pady=5)
+        
+        Label(frame_principal, text="Quartos:").grid(row=1, column=0, sticky='w', pady=5)
+        Entry(frame_principal, textvariable=var_quartos, width=10).grid(row=1, column=1, sticky='w', pady=5)
+        
+        Label(frame_principal, text="Banheiros:").grid(row=2, column=0, sticky='w', pady=5)
+        Entry(frame_principal, textvariable=var_banheiros, width=10).grid(row=2, column=1, sticky='w', pady=5)
+        
+        Label(frame_principal, text="Plataforma:").grid(row=3, column=0, sticky='w', pady=5)
+        Entry(frame_principal, textvariable=var_plataforma, width=20).grid(row=3, column=1, sticky='w', pady=5)
+        
+        # Frame para botões
+        frame_botoes = Frame(frame_principal)
+        frame_botoes.grid(row=4, column=0, columnspan=2, pady=10)
     
-    # =============================================
+   
+    # Função para salvar as alterações
+    def salvar_edicao():
+        # Validação dos campos
+        if not (var_endereco.get() and var_quartos.get() and var_banheiros.get() and var_plataforma.get()):
+            messagebox.showwarning("Campos obrigatórios", "Preencha todos os campos!")
+            return
+        
+        try:
+            quartos = int(var_quartos.get())
+            banheiros = int(var_banheiros.get())
+        except ValueError:
+            messagebox.showerror("Erro", "Quartos e banheiros devem ser números!")
+            return
+        
+        # Atualizar no banco de dados
+        conn = sqlite3.connect("sistema.db")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE imoveis 
+                SET endereco=?, quartos=?, banheiros=?, plataforma=?
+                WHERE id=?
+            """, (var_endereco.get(), quartos, banheiros, var_plataforma.get(), dados[0]))
+            conn.commit()
+            messagebox.showinfo("Sucesso", "Imóvel atualizado com sucesso!")
+            
+            # Atualizar a Treeview
+            self.carregar_imoveis()
+            janela_edicao.destroy()
+        except sqlite3.Error as e:
+            messagebox.showerror("Erro", f"Não foi possível atualizar:\n{str(e)}")
+        finally:
+            conn.close()
+    
+        # Botões
+        Button(frame_botoes, text="Salvar", command=salvar_edicao, width=10).pack(side=LEFT, padx=5)
+        Button(frame_botoes, text="Cancelar", command=janela_edicao.destroy, width=10).pack(side=LEFT, padx=5)
+    #========================================
     # MÓDULO LIMPEZA
     # =============================================
     
@@ -993,11 +1231,15 @@ class SistemaGestaoApp:
         
         # Carregar limpezas no treeview
         cursor.execute("""
-            SELECT l.id, i.endereco, l.data, l.horas_trabalhadas, l.valor_hora, l.valor_total
-            FROM limpezas l
-            JOIN imoveis i ON l.imovel_id = i.id
-            ORDER BY l.data DESC
-        """)
+        CREATE TABLE IF NOT EXISTS imoveis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente_id INTEGER,
+        endereco TEXT NOT NULL,
+        quartos INTEGER,
+        banheiros INTEGER,
+        FOREIGN KEY (cliente_id) REFERENCES clientes (id)
+    );
+    """)
         
         # Limpar treeview
         for item in self.tree_limpezas.get_children():
@@ -1083,8 +1325,8 @@ class SistemaGestaoApp:
         scrollbar.pack(side=RIGHT, fill=Y)
         
         self.tree_enxoval = ttk.Treeview(frame_tree, 
-                                       columns=('id', 'imovel', 'item', 'quantidade', 'data', 'valor_unitario', 'valor_total'),
-                                       yscrollcommand=scrollbar.set)
+                                    columns=('id', 'imovel', 'item', 'quantidade', 'data', 'valor_unitario', 'valor_total'),
+                                    yscrollcommand=scrollbar.set)
         self.tree_enxoval.pack(fill=BOTH, expand=True)
         scrollbar.config(command=self.tree_enxoval.yview)
         
@@ -1098,11 +1340,11 @@ class SistemaGestaoApp:
         
         # Formulário para registrar consumo de enxoval
         frame_form = Frame(self.frame_enxoval, bg=COR_CARD, bd=0, 
-                          highlightthickness=1, highlightbackground="#e0e0e0")
+                        highlightthickness=1, highlightbackground="#e0e0e0")
         frame_form.pack(fill=X, padx=10, pady=10)
         
         Label(frame_form, text="Registro de Consumo de Enxoval", bg=COR_CARD, 
-              fg=COR_TEXTO, font=self.fonte_titulo).pack(pady=(10, 5), anchor="w", padx=10)
+            fg=COR_TEXTO, font=self.fonte_titulo).pack(pady=(10, 5), anchor="w", padx=10)
         
         # Combobox para selecionar imóvel
         frame_imovel = Frame(frame_form, bg=COR_CARD)
@@ -1138,97 +1380,197 @@ class SistemaGestaoApp:
         frame_botoes.pack(fill=X, padx=10, pady=10)
         
         Button(frame_botoes, text="Adicionar", command=self.adicionar_consumo_enxoval,
-              bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
+            bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
         Button(frame_botoes, text="Limpar", command=self.limpar_form_enxoval,
-              bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
-    
+            bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
+        
+        # Carregar dados iniciais
+        self.carregar_itens_enxoval()
+
+    def adicionar_consumo_enxoval(self):
+            """Adiciona um novo consumo de enxoval ao banco de dados"""
+            try:
+                imovel = self.combo_imovel_enxoval.get()
+                item = self.combo_item_enxoval.get()
+                quantidade = self.entry_enxoval_quantidade.get()
+                data = self.entry_enxoval_data.get_date()
+                
+                if not all([imovel, item, quantidade, data]):
+                    messagebox.showerror("Erro", "Preencha todos os campos obrigatórios!")
+                    return
+                    
+                imovel_id = imovel.split(" - ")[0]
+                item_id = item.split(" - ")[0]
+                quantidade = int(quantidade)
+                
+                conn = sqlite3.connect("sistema.db")
+                cursor = conn.cursor()
+                
+                # Verificar se o item existe
+                cursor.execute("SELECT preco_unitario FROM tipos_enxoval WHERE id=?", (item_id,))
+                resultado = cursor.fetchone()
+                
+                if not resultado:
+                    messagebox.showerror("Erro", "Item selecionado não encontrado!")
+                    return
+                    
+                preco_unitario = resultado[0]
+                valor_total = quantidade * preco_unitario
+                
+                cursor.execute("""
+                    INSERT INTO consumo_enxoval 
+                    (imovel_id, item_id, quantidade, data)
+                    VALUES (?, ?, ?, ?)
+                """, (imovel_id, item_id, quantidade, data))
+                
+                conn.commit()
+                conn.close()
+                
+                messagebox.showinfo("Sucesso", "Consumo de enxoval registrado com sucesso!")
+                self.carregar_itens_enxoval()
+                self.limpar_form_enxoval()
+                
+            except ValueError:
+                messagebox.showerror("Erro", "Quantidade deve ser um número inteiro válido!")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Ocorreu um erro ao registrar o consumo:\n{str(e)}")
+
     def carregar_itens_enxoval(self):
         """Carrega os itens de enxoval no TreeView e atualiza os comboboxes"""
-        conn = sqlite3.connect("sistema.db")
-        cursor = conn.cursor()
-        
-        # Carregar imóveis no combobox
-        cursor.execute("SELECT id, endereco FROM imoveis")
-        imoveis = cursor.fetchall()
-        self.combo_imovel_enxoval['values'] = [f"{i[0]} - {i[1]}" for i in imoveis]
-        
-        if imoveis:
+        try:
+            conn = sqlite3.connect("sistema.db")
+            cursor = conn.cursor()
+            
+            # Carregar imóveis no combobox
+            cursor.execute("SELECT id, endereco FROM imoveis")
+            imoveis = cursor.fetchall()
+            self.combo_imovel_enxoval['values'] = [f"{i[0]} - {i[1]}" for i in imoveis]
+            
+            if imoveis:
+                self.combo_imovel_enxoval.current(0)
+            
+            # Carregar itens de enxoval no combobox
+            cursor.execute("SELECT id, nome, preco_unitario FROM tipos_enxoval")
+            itens = cursor.fetchall()
+            self.combo_item_enxoval['values'] = [f"{i[0]} - {i[1]} (R$ {i[2]:.2f})" for i in itens]
+            
+            if itens:
+                self.combo_item_enxoval.current(0)
+            
+            # Carregar consumo de enxoval no treeview
+            cursor.execute("""
+                SELECT c.id, i.endereco, t.nome, c.quantidade, c.data, t.preco_unitario, 
+                    (c.quantidade * t.preco_unitario) as valor_total
+                FROM consumo_enxoval c
+                JOIN imoveis i ON c.imovel_id = i.id
+                JOIN tipos_enxoval t ON c.item_id = t.id
+                ORDER BY c.data DESC
+            """)
+            
+            # Limpar treeview
+            for item in self.tree_enxoval.get_children():
+                self.tree_enxoval.delete(item)
+            
+            # Adicionar novos itens formatados
+            for row in cursor.fetchall():
+                self.tree_enxoval.insert('', 'end', values=(
+                    row[0], row[1], row[2], row[3], row[4],
+                    formatar_moeda(row[5]), 
+                    formatar_moeda(row[6])
+                ))
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao carregar itens de enxoval:\n{str(e)}")
+        finally:
+            conn.close()
+
+
+    def limpar_form_enxoval(self):
+        """Limpa o formulário de enxoval"""
+        self.entry_enxoval_quantidade.delete(0, END)
+        # Mantém os comboboxes com os valores atuais
+        if self.combo_imovel_enxoval['values']:
             self.combo_imovel_enxoval.current(0)
-        
-        # Carregar itens de enxoval no combobox
-        cursor.execute("SELECT id, nome, preco_unitario FROM tipos_enxoval")
-        itens = cursor.fetchall()
-        self.combo_item_enxoval['values'] = [f"{i[0]} - {i[1]} (R$ {i[2]:.2f})" for i in itens]
-        
-        if itens:
+        if self.combo_item_enxoval['values']:
             self.combo_item_enxoval.current(0)
-        
-        # Carregar consumo de enxoval no treeview
-        cursor.execute("""
-            SELECT c.id, i.endereco, t.nome, c.quantidade, c.data, t.preco_unitario, 
-                   (c.quantidade * t.preco_unitario) as valor_total
-            FROM consumo_enxoval c
-            JOIN imoveis i ON c.imovel_id = i.id
-            JOIN tipos_enxoval t ON c.item_id = t.id
-            ORDER BY c.data DESC
-        """)
-        
-        # Limpar treeview
-        for item in self.tree_enxoval.get_children():
-            self.tree_enxoval.delete(item)
-        
-        # Adicionar novos itens formatados
-        for row in cursor.fetchall():
-            self.tree_enxoval.insert('', 'end', values=(
-                row[0], row[1], row[2], row[3], row[4],
-                formatar_moeda(row[5]), 
-                formatar_moeda(row[6])
-            ))
-        
-        conn.close()
+        # Define a data atual como padrão
+        self.entry_enxoval_data.set_date(datetime.now().date())
     
     def criar_config_itens(self):
-        """Cria a interface para configurar itens (enxoval vs. suprimentos)"""
+        """Cria a interface para configurar itens de enxoval e suprimentos"""
         self.frame_config_itens = Frame(self.frame_conteudo, bg=COR_FUNDO)
         
-        # Treeview para listar todos os itens
-        frame_tree = Frame(self.frame_config_itens, bg=COR_FUNDO)
+        # Abas para separar enxoval de outros itens
+        notebook = ttk.Notebook(self.frame_config_itens)
+        notebook.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        
+        # Aba para Enxoval
+        frame_enxoval = Frame(notebook, bg=COR_FUNDO)
+        notebook.add(frame_enxoval, text="Enxoval")
+        
+        # Aba para Suprimentos
+        frame_suprimentos = Frame(notebook, bg=COR_FUNDO)
+        notebook.add(frame_suprimentos, text="Suprimentos")
+        
+        # Construir interface para cada aba
+        self._construir_aba_itens(frame_enxoval, "enxoval")
+        self._construir_aba_itens(frame_suprimentos, "suprimento")
+        
+        # Carregar dados iniciais
+        self.carregar_itens_config()
+
+    def _construir_aba_itens(self, parent_frame, tipo_item):
+        """Método auxiliar para construir a interface de cada tipo de item"""
+        # Treeview para listar itens
+        frame_tree = Frame(parent_frame, bg=COR_FUNDO)
         frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=10)
         
         scrollbar = Scrollbar(frame_tree)
         scrollbar.pack(side=RIGHT, fill=Y)
         
-        self.tree_itens = ttk.Treeview(frame_tree, columns=('id', 'nome', 'tipo', 'preco', 'unidade'), 
-                                    yscrollcommand=scrollbar.set)
-        self.tree_itens.pack(fill=BOTH, expand=True)
-        scrollbar.config(command=self.tree_itens.yview)
+        tree = ttk.Treeview(frame_tree, columns=('id', 'nome', 'preco', 'unidade'), 
+                            yscrollcommand=scrollbar.set, selectmode='browse')
+        tree.pack(fill=BOTH, expand=True)
+        scrollbar.config(command=tree.yview)
         
-        self.tree_itens.heading('#0', text='ID')
-        self.tree_itens.heading('#1', text='Nome')
-        self.tree_itens.heading('#2', text='Tipo')
-        self.tree_itens.heading('#3', text='Preço Unitário')
-        self.tree_itens.heading('#4', text='Unidade')
+        tree.heading('#0', text='ID')
+        tree.heading('#1', text='Nome')
+        tree.heading('#2', text='Preço Unitário')
+        tree.heading('#3', text='Unidade')
+        
+        # Armazenar referência para acesso posterior
+        if tipo_item == "enxoval":
+            self.tree_enxoval_config = tree
+        else:
+            self.tree_suprimentos_config = tree
+        
+        # Configurar bind para seleção
+        tree.bind('<<TreeviewSelect>>', lambda e: self._preencher_form_item(tipo_item))
         
         # Formulário para adicionar/editar itens
-        frame_form = Frame(self.frame_config_itens, bg=COR_CARD, bd=0, 
+        frame_form = Frame(parent_frame, bg=COR_CARD, bd=0, 
                         highlightthickness=1, highlightbackground="#e0e0e0")
         frame_form.pack(fill=X, padx=10, pady=10)
         
-        Label(frame_form, text="Adicionar/Editar Item", bg=COR_CARD, 
+        Label(frame_form, text=f"Configurar Itens de {tipo_item.capitalize()}", bg=COR_CARD, 
             fg=COR_TEXTO, font=self.fonte_titulo).pack(pady=(10, 5), anchor="w", padx=10)
         
         # Campos do formulário
         campos = [
             ("Nome:", Entry(frame_form)),
-            ("Tipo:", ttk.Combobox(frame_form, values=['enxoval', 'suprimento', 'limpeza'])),
             ("Preço Unitário (R$):", Entry(frame_form)),
-            ("Unidade de Medida:", Entry(frame_form))
+            ("Unidade de Medida:", ttk.Combobox(frame_form, values=['unidade', 'par', 'jogo', 'conjunto', 'metro']))
         ]
         
-        self.entry_item_nome = campos[0][1]
-        self.combo_item_tipo = campos[1][1]
-        self.entry_item_preco = campos[2][1]
-        self.entry_item_unidade = campos[3][1]
+        # Armazenar referências aos widgets
+        if tipo_item == "enxoval":
+            self.entry_enxoval_nome = campos[0][1]
+            self.entry_enxoval_preco = campos[1][1]
+            self.combo_enxoval_unidade = campos[2][1]
+        else:
+            self.entry_suprimento_nome = campos[0][1]
+            self.entry_suprimento_preco = campos[1][1]
+            self.combo_suprimento_unidade = campos[2][1]
         
         for texto, widget in campos:
             frame = Frame(frame_form, bg=COR_CARD)
@@ -1240,179 +1582,192 @@ class SistemaGestaoApp:
         frame_botoes = Frame(frame_form, bg=COR_CARD)
         frame_botoes.pack(fill=X, padx=10, pady=10)
         
-        Button(frame_botoes, text="Salvar", command=self.salvar_item_config,
+        Button(frame_botoes, text="Salvar", 
+            command=lambda: self._salvar_item(tipo_item),
             bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
-        Button(frame_botoes, text="Remover", command=self.remover_item_config,
+        Button(frame_botoes, text="Remover", 
+            command=lambda: self._remover_item(tipo_item),
             bg=COR_ALERTA, fg="white").pack(side=LEFT, padx=5)
-        Button(frame_botoes, text="Limpar", command=self.limpar_form_item,
+        Button(frame_botoes, text="Limpar", 
+            command=lambda: self._limpar_form_item(tipo_item),
             bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
-        
-        # Carregar dados iniciais
-        self.carregar_itens_config()
 
-    def carregar_itens_config(self):
-        """Carrega todos os itens para configuração"""
-        conn = sqlite3.connect("sistema.db")
-        cursor = conn.cursor()
-        
-        # Verificar se a tabela existe (caso o sistema seja atualizado)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS itens_servico (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            tipo TEXT NOT NULL CHECK(tipo IN ('enxoval', 'suprimento', 'limpeza')),
-            preco_unitario REAL DEFAULT 0.0,
-            unidade_medida TEXT
-        );
-        """)
-        
-        cursor.execute("SELECT id, nome, tipo, preco_unitario, unidade_medida FROM itens_servico")
-        
-        # Limpar treeview
-        for item in self.tree_itens.get_children():
-            self.tree_itens.delete(item)
-        
-        # Adicionar itens formatados
-        for row in cursor.fetchall():
-            preco = f"R$ {row[3]:.2f}" if row[3] else "N/A"
-            self.tree_itens.insert('', 'end', values=(row[0], row[1], row[2], preco, row[4] or "-"))
-        
-        conn.close()
-
-
-
-
-
-    def adicionar_consumo_enxoval(self):
-        """Adiciona um novo consumo de enxoval ao banco de dados"""
-        imovel_id = self.combo_imovel_enxoval.get().split(" - ")[0]
-        item_id = self.combo_item_enxoval.get().split(" - ")[0]
-        quantidade = self.entry_enxoval_quantidade.get()
-        data = self.entry_enxoval_data.get_date()
-        
-        if imovel_id and item_id and quantidade and data:
-            try:
-                quantidade = int(quantidade)
-                
-                conn = sqlite3.connect("sistema.db")
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO consumo_enxoval 
-                    (imovel_id, item_id, quantidade, data)
-                    VALUES (?, ?, ?, ?)
-                """, (imovel_id, item_id, quantidade, data))
-                conn.commit()
-                conn.close()
-                
-                messagebox.showinfo("Sucesso", "Consumo de enxoval registrado com sucesso!")
-                self.carregar_itens_enxoval()
-                self.limpar_form_enxoval()
-            except ValueError:
-                messagebox.showerror("Erro", "Quantidade deve ser um número inteiro")
+    def _preencher_form_item(self, tipo_item):
+        """Preenche o formulário com o item selecionado"""
+        if tipo_item == "enxoval":
+            tree = self.tree_enxoval_config
+            nome_entry = self.entry_enxoval_nome
+            preco_entry = self.entry_enxoval_preco
+            unidade_combo = self.combo_enxoval_unidade
         else:
-            messagebox.showerror("Erro", "Preencha todos os campos obrigatórios")
-    
-    def limpar_form_enxoval(self):
-        """Limpa o formulário de enxoval"""
-        self.entry_enxoval_quantidade.delete(0, END)
-    
-
-    def salvar_item_config(self):
-        nome = self.entry_item_nome.get()
-        tipo = self.combo_item_tipo.get()
-        preco = self.entry_item_preco.get()
-        unidade = self.entry_item_unidade.get()
+            tree = self.tree_suprimentos_config
+            nome_entry = self.entry_suprimento_nome
+            preco_entry = self.entry_suprimento_preco
+            unidade_combo = self.combo_suprimento_unidade
         
-        if not nome or not tipo:
-            messagebox.showerror("Erro", "Preencha pelo menos Nome e Tipo!")
+        selected = tree.selection()
+        if selected:
+            item = tree.item(selected[0])
+            values = item['values']
+            
+            nome_entry.delete(0, END)
+            nome_entry.insert(0, values[1])
+            
+            preco_entry.delete(0, END)
+            preco_entry.insert(0, values[2].replace('R$ ', ''))
+            
+            unidade_combo.set(values[3])
+            
+            # Armazenar ID do item selecionado
+            self.item_selecionado_id = values[0]
+            self.item_selecionado_tipo = tipo_item
+
+    def _salvar_item(self, tipo_item):
+        """Salva ou atualiza um item"""
+        if tipo_item == "enxoval":
+            nome = self.entry_enxoval_nome.get()
+            preco = self.entry_enxoval_preco.get()
+            unidade = self.combo_enxoval_unidade.get()
+            tabela = "tipos_enxoval"
+        else:
+            nome = self.entry_suprimento_nome.get()
+            preco = self.entry_suprimento_preco.get()
+            unidade = self.combo_suprimento_unidade.get()
+            tabela = "suprimentos"
+        
+        if not nome:
+            messagebox.showerror("Erro", "O nome é obrigatório!")
             return
         
         try:
             preco = float(preco) if preco else 0.0
         except ValueError:
-            messagebox.showerror("Erro", "Preço deve ser um número!")
+            messagebox.showerror("Erro", "Preço deve ser um número válido!")
             return
         
         conn = sqlite3.connect("sistema.db")
         cursor = conn.cursor()
         
-        
-        if hasattr(self, 'item_selecionado_id') and self.item_selecionado_id:
-            cursor.execute("""
-                UPDATE itens_servico 
-                SET nome=?, tipo=?, preco_unitario=?, unidade_medida=?
+        if hasattr(self, 'item_selecionado_id') and self.item_selecionado_id and self.item_selecionado_tipo == tipo_item:
+            # Atualizar item existente
+            cursor.execute(f"""
+                UPDATE {tabela} 
+                SET nome=?, preco_unitario=?, unidade_medida=?
                 WHERE id=?
-            """, (nome, tipo, preco, unidade, self.item_selecionado_id))
+            """, (nome, preco, unidade, self.item_selecionado_id))
         else:
-            cursor.execute("""
-                INSERT INTO itens_servico (nome, tipo, preco_unitario, unidade_medida)
-                VALUES (?, ?, ?, ?)
-            """, (nome, tipo, preco, unidade))
-        
-        # Sincronizar com as tabelas usadas nos módulos
-        if tipo == "enxoval":
-            cursor.execute("INSERT OR IGNORE INTO tipos_enxoval (nome, preco_unitario) VALUES (?, ?)", (nome, preco))
-        elif tipo == "suprimento":
-            cursor.execute("INSERT OR IGNORE INTO suprimentos (nome, preco_unitario) VALUES (?, ?)", (nome, preco))
-        # Se quiser, pode fazer o mesmo para "limpeza" em outra tabela
+            # Inserir novo item
+            cursor.execute(f"""
+                INSERT INTO {tabela} (nome, preco_unitario, unidade_medida)
+                VALUES (?, ?, ?)
+            """, (nome, preco, unidade))
         
         conn.commit()
         conn.close()
         
         messagebox.showinfo("Sucesso", "Item salvo com sucesso!")
         self.carregar_itens_config()
-        self.limpar_form_item()
+        self._limpar_form_item(tipo_item)
 
-    def remover_item_config(self):
+    def _remover_item(self, tipo_item):
         """Remove o item selecionado"""
-        if not hasattr(self, 'item_selecionado_id') or not self.item_selecionado_id:
+        if not hasattr(self, 'item_selecionado_id') or not self.item_selecionado_id or self.item_selecionado_tipo != tipo_item:
             messagebox.showerror("Erro", "Nenhum item selecionado!")
             return
         
         resposta = messagebox.askyesno("Confirmar", "Tem certeza que deseja remover este item?")
         if resposta:
+            tabela = "tipos_enxoval" if tipo_item == "enxoval" else "suprimentos"
+            
             conn = sqlite3.connect("sistema.db")
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM itens_servico WHERE id=?", (self.item_selecionado_id,))
-            conn.commit()
-            conn.close()
             
-            messagebox.showinfo("Sucesso", "Item removido!")
-            self.carregar_itens_config()
-            self.limpar_form_item()
+            try:
+                # Verificar se o item está em uso
+                if tipo_item == "enxoval":
+                    cursor.execute("SELECT COUNT(*) FROM consumo_enxoval WHERE item_id=?", (self.item_selecionado_id,))
+                else:
+                    cursor.execute("SELECT COUNT(*) FROM consumo_suprimentos WHERE item_id=?", (self.item_selecionado_id,))
+                
+                if cursor.fetchone()[0] > 0:
+                    messagebox.showerror("Erro", "Este item está em uso e não pode ser removido!")
+                    return
+                
+                # Remover o item
+                cursor.execute(f"DELETE FROM {tabela} WHERE id=?", (self.item_selecionado_id,))
+                conn.commit()
+                messagebox.showinfo("Sucesso", "Item removido!")
+                
+                self.carregar_itens_config()
+                self._limpar_form_item(tipo_item)
+            finally:
+                conn.close()
 
-    def limpar_form_item(self):
-        """Limpa o formulário de itens"""
-        self.entry_item_nome.delete(0, END)
-        self.combo_item_tipo.set('')
-        self.entry_item_preco.delete(0, END)
-        self.entry_item_unidade.delete(0, END)
+    def _limpar_form_item(self, tipo_item):
+            """Limpa o formulário de itens"""
+            if tipo_item == "enxoval":
+                self.entry_enxoval_nome.delete(0, END)
+                self.entry_enxoval_preco.delete(0, END)
+                self.combo_enxoval_unidade.set('')
+            else:
+                self.entry_suprimento_nome.delete(0, END)
+                self.entry_suprimento_preco.delete(0, END)
+                self.combo_suprimento_unidade.set('')
+            
+            if hasattr(self, 'item_selecionado_id'):
+                del self.item_selecionado_id
+            if hasattr(self, 'item_selecionado_tipo'):
+                del self.item_selecionado_tipo
+
+    def carregar_itens_config(self):
+        """Carrega todos os itens para configuração"""
+        conn = sqlite3.connect("sistema.db")
+        cursor = conn.cursor()
         
-        if hasattr(self, 'item_selecionado_id'):
-            del self.item_selecionado_id
+        try:
+            # Verificar se a coluna unidade_medida existe, se não, adicionar
+            cursor.execute("PRAGMA table_info(tipos_enxoval)")
+            colunas = [col[1] for col in cursor.fetchall()]
+            
+            if 'unidade_medida' not in colunas:
+                cursor.execute("ALTER TABLE tipos_enxoval ADD COLUMN unidade_medida TEXT DEFAULT 'unidade'")
+                conn.commit()
+            
+            # Carregar itens de enxoval
+            cursor.execute("""
+                SELECT id, nome, preco_unitario, 
+                    COALESCE(unidade_medida, 'unidade') as unidade_medida 
+                FROM tipos_enxoval 
+                ORDER BY nome
+            """)
+            self._preencher_treeview(self.tree_enxoval_config, cursor.fetchall())
+            
+            # Carregar suprimentos (se aplicável)
+            if hasattr(self, 'tree_suprimentos_config'):
+                cursor.execute("""
+                    SELECT id, nome, preco_unitario, 
+                        COALESCE(unidade_medida, 'unidade') as unidade_medida 
+                    FROM suprimentos 
+                    ORDER BY nome
+                """)
+                self._preencher_treeview(self.tree_suprimentos_config, cursor.fetchall())
+                
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao carregar itens:\n{str(e)}")
+        finally:
+            conn.close()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    def _preencher_treeview(self, tree, dados):
+            """Preenche um treeview com os dados fornecidos"""
+            # Limpar treeview
+            for item in tree.get_children():
+                tree.delete(item)
+            
+            # Adicionar itens formatados
+            for row in dados:
+                preco = f"R$ {row[2]:.2f}" if row[2] is not None else "N/A"
+                unidade = row[3] if row[3] else "unidade"
+                tree.insert('', 'end', values=(row[0], row[1], preco, unidade))
 
 
     # =============================================
