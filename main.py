@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 import sqlite3
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
@@ -11,6 +13,10 @@ from tkcalendar import DateEntry
 import webbrowser
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import docx
+from docx.shared import Pt, RGBColor
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 # =============================================
 # CONFIGURAÇÕES INICIAIS
 # =============================================
@@ -25,8 +31,31 @@ COR_ALERTA = "#e74c3c"
 COR_SUCESSO = "#2ecc71"
 
 # Configurar diretórios
-os.makedirs("comprovantes", exist_ok=True)
-os.makedirs("relatorios", exist_ok=True)
+def get_app_data_dir():
+    """Retorna o diretório correto para cada sistema operacional"""
+    home = Path.home()
+    
+    if sys.platform == "win32":
+        return home / "AppData" / "Local" / "SeuApp"
+    elif sys.platform == "linux":
+        return home / ".local" / "share" / "seuapp"  # Padrão no Linux
+    elif sys.platform == "darwin":  # MacOS
+        return home / "Library" / "Application Support" / "SeuApp"
+    else:
+        return Path(__file__).parent  # Fallback
+
+
+
+APP_DATA_DIR = Path.home() / "AppData" / "Local" / "SeuApp"
+COMPROVANTES_DIR = APP_DATA_DIR / "comprovantes"
+RELATORIOS_DIR = APP_DATA_DIR / "relatorios"
+
+
+try:
+    COMPROVANTES_DIR.mkdir(parents=True, exist_ok=True)
+    RELATORIOS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    print(f"Erro ao criar pastas: {e}")
 
 # =============================================
 # BANCO DE DADOS - ESTRUTURA SIMPLIFICADA
@@ -76,15 +105,6 @@ def inicializar_banco_dados():
     );
     """)
     
-    # Tabela de itens do enxoval
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS tipos_enxoval (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        preco_unitario REAL DEFAULT 0.0
-    );
-    """)
-    
     # Tabela de tipos de enxoval 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS tipos_enxoval (
@@ -109,6 +129,17 @@ def inicializar_banco_dados():
     )
     """)
     
+    # Tabela de suprimentos
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS suprimentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        preco_unitario REAL DEFAULT 0.0,
+        unidade_medida TEXT DEFAULT 'unidade',
+        data_cadastro DATE DEFAULT CURRENT_DATE
+    )
+    """)
+    
     # Tabela de reposição de suprimentos
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS reposicao_suprimentos (
@@ -123,53 +154,53 @@ def inicializar_banco_dados():
         FOREIGN KEY (suprimento_id) REFERENCES suprimentos (id)
     );
     """)
-    
+
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fechamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,  -- 'imovel' ou 'cliente'
+            referencia_id INTEGER NOT NULL,  -- id do imóvel ou cliente
+            data_inicio DATE NOT NULL,
+            data_fim DATE NOT NULL,
+            data_fechamento DATE DEFAULT CURRENT_DATE,
+            valor_total REAL NOT NULL,
+            observacoes TEXT,
+            comprovante_path TEXT
+    );  
+    """)
+
     # Inserir dados básicos se as tabelas estiverem vazias
     cursor.execute("SELECT COUNT(*) FROM tipos_enxoval")
     if cursor.fetchone()[0] == 0:
         itens_enxoval = [
-            ('Lençol Solteiro', 45.0),
-            ('Lençol Casal', 65.0),
-            ('Lençol Queen', 75.0),
-            ('Lençol King', 85.0),
-            ('Toalha de Banho', 35.0),
-            ('Toalha de Rosto', 25.0),
-            ('Toalha de Mesa', 30.0),
-            ('Cobertor', 90.0),
-            ('Edredom', 120.0)
+            ('Lençol Solteiro', 45.0, 'unidade'),
+            ('Lençol Casal', 65.0, 'unidade'),
+            ('Lençol Queen', 75.0, 'unidade'),
+            ('Lençol King', 85.0, 'unidade'),
+            ('Toalha de Banho', 35.0, 'unidade'),
+            ('Toalha de Rosto', 25.0, 'unidade'),
+            ('Toalha de Mesa', 30.0, 'unidade'),
+            ('Cobertor', 90.0, 'unidade'),
+            ('Edredom', 120.0, 'unidade')
         ]
-        cursor.executemany("INSERT INTO tipos_enxoval (nome, preco_unitario) VALUES (?, ?)", itens_enxoval)
+        cursor.executemany("INSERT INTO tipos_enxoval (nome, preco_unitario, unidade_medida) VALUES (?, ?, ?)", itens_enxoval)
     
     cursor.execute("SELECT COUNT(*) FROM suprimentos")
     if cursor.fetchone()[0] == 0:
         suprimentos = [
-            ('Sabonete', 1.5),
-            ('Shampoo', 5.0),
-            ('Condicionador', 5.0),
-            ('Papel Higiênico', 0.5),
-            ('Papel Toalha', 2.0),
-            ('Café', 15.0),
-            ('Açúcar', 8.0),
-            ('Sabão em Pó', 12.0),
-            ('Amaciante', 10.0)
+            ('Sabonete', 1.5, 'unidade'),
+            ('Shampoo', 5.0, 'unidade'),
+            ('Condicionador', 5.0, 'unidade'),
+            ('Papel Higiênico', 0.5, 'rolo'),
+            ('Papel Toalha', 2.0, 'rolo'),
+            ('Café', 15.0, 'pacote'),
+            ('Açúcar', 8.0, 'kg'),
+            ('Sabão em Pó', 12.0, 'kg'),
+            ('Amaciante', 10.0, 'litro')
         ]
-        cursor.executemany("INSERT INTO suprimentos (nome, preco_unitario) VALUES (?, ?)", suprimentos)
+        cursor.executemany("INSERT INTO suprimentos (nome, preco_unitario, unidade_medida) VALUES (?, ?, ?)", suprimentos)
     
-    
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS itens_servico (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        tipo TEXT NOT NULL CHECK(tipo IN ('enxoval', 'suprimento', 'limpeza')),
-        preco_unitario REAL DEFAULT 0.0,
-        unidade_medida TEXT
-    );
-    """)
-
-
-
-
-
 
     conn.commit()
     conn.close()
@@ -393,7 +424,8 @@ class SistemaGestaoApp:
             ("Enxoval", "enxoval"),
             ("Configurar Itens", "config_itens"),
             ("Suprimentos", "suprimentos"),
-            ("Relatórios", "relatorios")
+            ("Relatórios", "relatorios"),
+            ("Fechar Contas", "fechar_contas")
         ]
         
         for texto, comando in modulos:
@@ -425,6 +457,9 @@ class SistemaGestaoApp:
         self.criar_suprimentos()
         self.criar_relatorios()
         self.criar_config_itens()
+        self.criar_fechamento_contas()
+   
+
 
     def mostrar_tela(self, tela):
         """Controla qual tela mostrar"""
@@ -453,6 +488,8 @@ class SistemaGestaoApp:
             self.frame_relatorios.pack(fill=BOTH, expand=True)
         elif tela == "config_itens":
             self.frame_config_itens.pack(fill=BOTH, expand=True)
+        elif tela == "fechar_contas":
+            self.frame_fechamento.pack(fill=BOTH, expand=True)
 
     # =============================================
     # MÓDULO DASHBOARD
@@ -517,8 +554,7 @@ class SistemaGestaoApp:
         self.canvas_grafico2.draw()
         self.canvas_grafico2.get_tk_widget().pack(fill=BOTH, expand=True)
 
-    # ...existing code...
-
+    
     def criar_card(self, parent, titulo, valor, cor):
         """Cria um card de resumo para o dashboard"""
         card = Frame(parent, bg=COR_CARD, bd=0, 
@@ -1148,7 +1184,7 @@ class SistemaGestaoApp:
         
         # Treeview para listar limpezas
         frame_tree = Frame(self.frame_limpeza, bg=COR_FUNDO)
-        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=(10, 5))
         
         scrollbar = Scrollbar(frame_tree)
         scrollbar.pack(side=RIGHT, fill=Y)
@@ -1168,54 +1204,73 @@ class SistemaGestaoApp:
         
         # Formulário para adicionar limpezas
         frame_form = Frame(self.frame_limpeza, bg=COR_CARD, bd=0, 
-                         highlightthickness=1, highlightbackground="#e0e0e0")
-        frame_form.pack(fill=X, padx=10, pady=10)
+                        highlightthickness=1, highlightbackground="#e0e0e0",
+                        padx=10, pady=10)
+        frame_form.pack(fill=X, padx=10, pady=(5, 10))
         
+        # Título do formulário
         Label(frame_form, text="Registro de Limpeza", bg=COR_CARD, 
-              fg=COR_TEXTO, font=self.fonte_titulo).pack(pady=(10, 5), anchor="w", padx=10)
+            fg=COR_TEXTO, font=self.fonte_titulo).grid(row=0, column=0, columnspan=3, 
+                                                        pady=(0, 15), sticky="w")
         
-        # Combobox para selecionar imóvel
-        frame_imovel = Frame(frame_form, bg=COR_CARD)
-        frame_imovel.pack(fill=X, padx=10, pady=5)
-        Label(frame_imovel, text="Imóvel:", bg=COR_CARD).pack(side=LEFT, padx=5)
-        self.combo_imovel_limpeza = ttk.Combobox(frame_imovel)
-        self.combo_imovel_limpeza.pack(side=LEFT, expand=True, fill=X)
-        
-        # Campos de data e horários
-        campos = [
+        # Grid para organização dos campos
+        rows = [
+            ("Imóvel:", ttk.Combobox(frame_form)),
             ("Data:", DateEntry(frame_form, date_pattern='dd/mm/yyyy')),
-            ("Hora Início (HH:MM):", Entry(frame_form)),
-            ("Hora Fim (HH:MM):", Entry(frame_form)),
+            ("Hora Início:", Entry(frame_form)),
+            ("Hora Fim:", Entry(frame_form)),
             ("Valor por Hora (R$):", Entry(frame_form)),
             ("Observações:", Text(frame_form, height=3))
         ]
         
-        self.entry_limpeza_data = campos[0][1]
-        self.entry_limpeza_hora_inicio = campos[1][1]
-        self.entry_limpeza_hora_fim = campos[2][1]
-        self.entry_limpeza_valor_hora = campos[3][1]
-        self.entry_limpeza_observacoes = campos[4][1]
+        # Configurar widgets e referências
+        self.combo_imovel_limpeza = rows[0][1]
+        self.entry_limpeza_data = rows[1][1]
+        self.entry_limpeza_hora_inicio = rows[2][1]
+        self.entry_limpeza_hora_fim = rows[3][1]
+        self.entry_limpeza_valor_hora = rows[4][1]
+        self.entry_limpeza_observacoes = rows[5][1]
         
         # Configurar valor padrão para hora
         self.entry_limpeza_valor_hora.insert(0, "30.00")
         
-        for texto, widget in campos:
-            frame = Frame(frame_form, bg=COR_CARD)
-            frame.pack(fill=X, padx=10, pady=5)
-            Label(frame, text=texto, bg=COR_CARD).pack(side=LEFT, padx=5)
-            widget.pack(side=LEFT, expand=True, fill=X)
+        # Posicionar widgets usando grid
+        for i, (label_text, widget) in enumerate(rows, start=1):
+            # Label
+            Label(frame_form, text=label_text, bg=COR_CARD, anchor="e", width=15).grid(
+                row=i, column=0, padx=(0, 5), pady=3, sticky="e")
+            
+            # Widget
+            if isinstance(widget, Text):
+                widget.grid(row=i, column=1, columnspan=2, sticky="ew", pady=3)
+                # Adicionar scrollbar para o Text
+                scroll_text = Scrollbar(frame_form, command=widget.yview)
+                scroll_text.grid(row=i, column=3, sticky="ns")
+                widget.config(yscrollcommand=scroll_text.set)
+            else:
+                widget.grid(row=i, column=1, columnspan=2, sticky="ew", pady=3)
         
-        # Botões
+        # Configurar pesos das colunas
+        frame_form.columnconfigure(0, weight=0)
+        frame_form.columnconfigure(1, weight=1)
+        frame_form.columnconfigure(2, weight=1)
+        
+        # Frame para botões (centralizado)
         frame_botoes = Frame(frame_form, bg=COR_CARD)
-        frame_botoes.pack(fill=X, padx=10, pady=10)
+        frame_botoes.grid(row=len(rows)+1, column=0, columnspan=3, pady=(10, 0))
         
+        # Botões com espaçamento uniforme
         Button(frame_botoes, text="Adicionar", command=self.adicionar_limpeza,
-              bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
+            bg=COR_DESTAQUE, fg="white", width=12).pack(side=LEFT, padx=5, ipady=3)
         Button(frame_botoes, text="Calcular", command=self.calcular_limpeza,
-              bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
+            bg=COR_SECUNDARIA, fg="white", width=12).pack(side=LEFT, padx=5, ipady=3)
         Button(frame_botoes, text="Limpar", command=self.limpar_form_limpeza,
-              bg=COR_ALERTA, fg="white").pack(side=LEFT, padx=5)
-    
+            bg=COR_ALERTA, fg="white", width=12).pack(side=LEFT, padx=5, ipady=3)
+        
+        # Configurar padding para todos os widgets filhos
+        for child in frame_form.winfo_children():
+            child.grid_configure(padx=5, pady=2)
+            
     def carregar_limpezas(self):
         """Carrega as limpezas no TreeView e atualiza o combobox de imóveis"""
         conn = sqlite3.connect("sistema.db")
@@ -1314,78 +1369,109 @@ class SistemaGestaoApp:
     # =============================================
     
     def criar_enxoval(self):
-        """Cria a interface para gestão de enxoval"""
+        """Cria a interface para gestão de enxoval com layout profissional"""
         self.frame_enxoval = Frame(self.frame_conteudo, bg=COR_FUNDO)
         
+        # Container principal com grid layout
+        container = Frame(self.frame_enxoval, bg=COR_FUNDO)
+        container.pack(fill=BOTH, expand=True, padx=20, pady=20)
+        
+        # Seção da tabela (60% da largura)
+        frame_tabela = Frame(container, bg=COR_FUNDO)
+        frame_tabela.grid(row=0, column=0, sticky="nsew", padx=(0, 15))
+        
         # Treeview para listar consumo de enxoval
-        frame_tree = Frame(self.frame_enxoval, bg=COR_FUNDO)
-        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        Label(frame_tabela, text="Histórico de Consumo", bg=COR_FUNDO, 
+            fg=COR_TEXTO, font=self.fonte_subtitulo).pack(anchor="w", pady=(0, 10))
         
-        scrollbar = Scrollbar(frame_tree)
-        scrollbar.pack(side=RIGHT, fill=Y)
+        frame_tree = Frame(frame_tabela, bg=COR_FUNDO)
+        frame_tree.pack(fill=BOTH, expand=True)
         
-        self.tree_enxoval = ttk.Treeview(frame_tree, 
-                                    columns=('id', 'imovel', 'item', 'quantidade', 'data', 'valor_unitario', 'valor_total'),
-                                    yscrollcommand=scrollbar.set)
+        scroll_y = Scrollbar(frame_tree)
+        scroll_y.pack(side=RIGHT, fill=Y)
+        
+        scroll_x = Scrollbar(frame_tree, orient='horizontal')
+        scroll_x.pack(side=BOTTOM, fill=X)
+        
+        self.tree_enxoval = ttk.Treeview(
+            frame_tree,
+            columns=('id', 'imovel', 'item', 'quantidade', 'data', 'valor_unitario', 'valor_total'),
+            yscrollcommand=scroll_y.set,
+            xscrollcommand=scroll_x.set,
+            selectmode='browse',
+            height=15
+        )
         self.tree_enxoval.pack(fill=BOTH, expand=True)
-        scrollbar.config(command=self.tree_enxoval.yview)
         
-        self.tree_enxoval.heading('#0', text='ID')
-        self.tree_enxoval.heading('#1', text='Imóvel')
-        self.tree_enxoval.heading('#2', text='Item')
-        self.tree_enxoval.heading('#3', text='Quantidade')
-        self.tree_enxoval.heading('#4', text='Data')
-        self.tree_enxoval.heading('#5', text='Valor Unitário')
-        self.tree_enxoval.heading('#6', text='Valor Total')
+        scroll_y.config(command=self.tree_enxoval.yview)
+        scroll_x.config(command=self.tree_enxoval.xview)
         
-        # Formulário para registrar consumo de enxoval
-        frame_form = Frame(self.frame_enxoval, bg=COR_CARD, bd=0, 
-                        highlightthickness=1, highlightbackground="#e0e0e0")
-        frame_form.pack(fill=X, padx=10, pady=10)
-        
-        Label(frame_form, text="Registro de Consumo de Enxoval", bg=COR_CARD, 
-            fg=COR_TEXTO, font=self.fonte_titulo).pack(pady=(10, 5), anchor="w", padx=10)
-        
-        # Combobox para selecionar imóvel
-        frame_imovel = Frame(frame_form, bg=COR_CARD)
-        frame_imovel.pack(fill=X, padx=10, pady=5)
-        Label(frame_imovel, text="Imóvel:", bg=COR_CARD).pack(side=LEFT, padx=5)
-        self.combo_imovel_enxoval = ttk.Combobox(frame_imovel)
-        self.combo_imovel_enxoval.pack(side=LEFT, expand=True, fill=X)
-        
-        # Combobox para selecionar item
-        frame_item = Frame(frame_form, bg=COR_CARD)
-        frame_item.pack(fill=X, padx=10, pady=5)
-        Label(frame_item, text="Item:", bg=COR_CARD).pack(side=LEFT, padx=5)
-        self.combo_item_enxoval = ttk.Combobox(frame_item)
-        self.combo_item_enxoval.pack(side=LEFT, expand=True, fill=X)
-        
-        # Campos de quantidade e data
-        campos = [
-            ("Quantidade:", Entry(frame_form)),
-            ("Data:", DateEntry(frame_form, date_pattern='dd/mm/yyyy'))
+        # Configuração das colunas
+        colunas = [
+            ('ID', 50, 'center'),
+            ('Imóvel', 150, 'w'),
+            ('Item', 120, 'w'),
+            ('Quantidade', 80, 'center'),
+            ('Data', 100, 'center'),
+            ('Valor Unitário', 100, 'e'),
+            ('Valor Total', 120, 'e')
         ]
         
-        self.entry_enxoval_quantidade = campos[0][1]
-        self.entry_enxoval_data = campos[1][1]
+        for idx, (text, width, anchor) in enumerate(colunas):
+            self.tree_enxoval.heading(f'#{idx}', text=text)
+            self.tree_enxoval.column(f'#{idx}', width=width, anchor=anchor)
         
-        for texto, widget in campos:
-            frame = Frame(frame_form, bg=COR_CARD)
-            frame.pack(fill=X, padx=10, pady=5)
-            Label(frame, text=texto, bg=COR_CARD).pack(side=LEFT, padx=5)
-            widget.pack(side=LEFT, expand=True, fill=X)
+        # Remover a coluna #0 extra
+        self.tree_enxoval.column('#0', width=0, stretch=NO)
         
-        # Botões
-        frame_botoes = Frame(frame_form, bg=COR_CARD)
-        frame_botoes.pack(fill=X, padx=10, pady=10)
+        # Seção do formulário (40% da largura)
+        frame_formulario = Frame(container, bg=COR_FUNDO)
+        frame_formulario.grid(row=0, column=1, sticky="nsew")
+        
+        # Card do formulário
+        form_card = Frame(frame_formulario, bg=COR_CARD, padx=15, pady=15,
+                        highlightthickness=1, highlightbackground="#e0e0e0")
+        form_card.pack(fill=BOTH, expand=True)
+        
+        Label(form_card, text="Registrar Consumo", bg=COR_CARD, 
+            fg=COR_TEXTO, font=self.fonte_subtitulo).grid(row=0, column=0, columnspan=2, pady=(0, 15), sticky="w")
+        
+        # Campos do formulário com grid layout
+        campos = [
+            ('Imóvel:', self.combo_imovel_enxoval, ttk.Combobox(form_card)),
+            ('Item:', self.combo_item_enxoval, ttk.Combobox(form_card)),
+            ('Quantidade:', self.entry_enxoval_quantidade, Entry(form_card)),
+            ('Data:', self.entry_enxoval_data, DateEntry(form_card, date_pattern='dd/mm/yyyy'))
+        ]
+        
+        for row, (label_text, var, widget) in enumerate(campos, start=1):
+            # Atribui o widget à variável de instância
+            setattr(self, var if isinstance(var, str) else var.widget, widget)
+            
+            Label(form_card, text=label_text, bg=COR_CARD).grid(
+                row=row, column=0, padx=5, pady=5, sticky="w")
+            
+            widget.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+            form_card.grid_columnconfigure(1, weight=1)  # Expande a coluna dos campos
+        
+        # Frame de botões
+        frame_botoes = Frame(form_card, bg=COR_CARD)
+        frame_botoes.grid(row=len(campos)+1, column=0, columnspan=2, pady=(15, 0), sticky="ew")
         
         Button(frame_botoes, text="Adicionar", command=self.adicionar_consumo_enxoval,
-            bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
+            bg=COR_DESTAQUE, fg="white", width=12).pack(side=LEFT, padx=5)
         Button(frame_botoes, text="Limpar", command=self.limpar_form_enxoval,
-            bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
+            bg=COR_SECUNDARIA, fg="white", width=12).pack(side=LEFT, padx=5)
+        
+        # Configuração do grid do container principal
+        container.grid_columnconfigure(0, weight=6)  # 60% para tabela
+        container.grid_columnconfigure(1, weight=4)  # 40% para formulário
+        container.grid_rowconfigure(0, weight=1)
         
         # Carregar dados iniciais
         self.carregar_itens_enxoval()
+
+# Os métodos adicionar_consumo_enxoval, carregar_itens_enxoval e limpar_form_enxoval permanecem os mesmos
 
     def adicionar_consumo_enxoval(self):
             """Adiciona um novo consumo de enxoval ao banco de dados"""
@@ -1497,26 +1583,19 @@ class SistemaGestaoApp:
         self.entry_enxoval_data.set_date(datetime.now().date())
     
     def criar_config_itens(self):
-        """Cria a interface para configurar itens de enxoval e suprimentos"""
+        """Cria a interface para configuração de itens de enxoval e suprimentos"""
         self.frame_config_itens = Frame(self.frame_conteudo, bg=COR_FUNDO)
-        
-        # Abas para separar enxoval de outros itens
-        notebook = ttk.Notebook(self.frame_config_itens)
-        notebook.pack(fill=BOTH, expand=True, padx=10, pady=10)
-        
-        # Aba para Enxoval
-        frame_enxoval = Frame(notebook, bg=COR_FUNDO)
-        notebook.add(frame_enxoval, text="Enxoval")
-        
-        # Aba para Suprimentos
-        frame_suprimentos = Frame(notebook, bg=COR_FUNDO)
-        notebook.add(frame_suprimentos, text="Suprimentos")
-        
-        # Construir interface para cada aba
+        # Abas para enxoval e suprimentos
+        abas = ttk.Notebook(self.frame_config_itens)
+        frame_enxoval = Frame(abas, bg=COR_FUNDO)
+        frame_suprimentos = Frame(abas, bg=COR_FUNDO)
+        abas.add(frame_enxoval, text="Itens de Enxoval")
+        abas.add(frame_suprimentos, text="Itens de Suprimentos")
+        abas.pack(fill=BOTH, expand=True)
+        # Constrói as abas usando seu método auxiliar
         self._construir_aba_itens(frame_enxoval, "enxoval")
-        self._construir_aba_itens(frame_suprimentos, "suprimento")
-        
-        # Carregar dados iniciais
+        self._construir_aba_itens(frame_suprimentos, "suprimentos")
+        # Carrega os itens
         self.carregar_itens_config()
 
     def _construir_aba_itens(self, parent_frame, tipo_item):
@@ -1944,74 +2023,800 @@ class SistemaGestaoApp:
     # =============================================
     
     def criar_relatorios(self):
-        """Cria a interface para geração de relatórios"""
+        """Cria a interface para geração de relatórios profissionais"""
         self.frame_relatorios = Frame(self.frame_conteudo, bg=COR_FUNDO)
         
         # Frame para os botões de relatório
         frame_botoes = Frame(self.frame_relatorios, bg=COR_FUNDO)
         frame_botoes.pack(fill=X, padx=10, pady=20)
         
+        # Botões em um frame horizontal
+        frame_botoes_horizontal = Frame(frame_botoes, bg=COR_FUNDO)
+        frame_botoes_horizontal.pack(fill=X)
+        
         # Botão para gerar relatório semanal
-        btn_relatorio_semanal = Button(frame_botoes, 
-                                     text="Gerar Relatório Semanal",
-                                     command=self.gerar_relatorio_semanal_interface,
-                                     bg=COR_DESTAQUE,
-                                     fg="white",
-                                     font=self.fonte_titulo,
-                                     padx=20,
-                                     pady=10)
-        btn_relatorio_semanal.pack(fill=X)
+        btn_relatorio_semanal = Button(frame_botoes_horizontal, 
+                                    text="Gerar Relatório Semanal",
+                                    command=self._gerar_relatorio_semanal,
+                                    bg=COR_DESTAQUE,
+                                    fg="white",
+                                    font=("Arial", 10, "bold"),
+                                    padx=15,
+                                    pady=8)
+        btn_relatorio_semanal.pack(side=LEFT, padx=5)
+        
+        # Botão para gerar relatório mensal
+        btn_relatorio_mensal = Button(frame_botoes_horizontal, 
+                                    text="Gerar Relatório Mensal",
+                                    command=self._gerar_relatorio_mensal,
+                                    bg=COR_SECUNDARIA,
+                                    fg="white",
+                                    font=("Arial", 10, "bold"),
+                                    padx=15,
+                                    pady=8)
+        btn_relatorio_mensal.pack(side=LEFT, padx=5)
+        
+        # Botão para exportar para PDF
+        btn_exportar_pdf = Button(frame_botoes_horizontal, 
+                                text="Exportar para PDF",
+                                command=self.exportar_para_pdf,
+                                bg="#4CAF50",
+                                fg="white",
+                                font=("Arial", 10, "bold"),
+                                padx=15,
+                                pady=8)
+        btn_exportar_pdf.pack(side=LEFT, padx=5)
         
         # Frame para visualização do relatório
         frame_visualizacao = Frame(self.frame_relatorios, bg=COR_FUNDO)
         frame_visualizacao.pack(fill=BOTH, expand=True, padx=10, pady=10)
         
-        Label(frame_visualizacao, text="Último Relatório Gerado", bg=COR_FUNDO, 
-              font=self.fonte_titulo).pack(anchor="w")
+        # Barra de rolagem
+        scrollbar = Scrollbar(frame_visualizacao)
+        scrollbar.pack(side=RIGHT, fill=Y)
         
-        self.texto_relatorio = Text(frame_visualizacao, wrap=WORD, bg=COR_CARD)
+        # Área de texto com barra de rolagem
+        self.texto_relatorio = Text(frame_visualizacao, 
+                                wrap=WORD, 
+                                bg="white",
+                                fg="#333333",
+                                font=("Arial", 10),
+                                yscrollcommand=scrollbar.set,
+                                padx=10,
+                                pady=10)
         self.texto_relatorio.pack(fill=BOTH, expand=True)
+        scrollbar.config(command=self.texto_relatorio.yview)
+        
+        # Configurar tags para formatação
+        self.texto_relatorio.tag_configure("titulo", font=("Arial", 14, "bold"), foreground=COR_PRIMARIA)
+        self.texto_relatorio.tag_configure("cabecalho", font=("Arial", 12, "bold"), foreground=COR_SECUNDARIA)
+        self.texto_relatorio.tag_configure("subtitulo", font=("Arial", 11, "italic"), foreground="#666666")
+        self.texto_relatorio.tag_configure("destaque", font=("Arial", 10, "bold"), foreground=COR_DESTAQUE)
+        self.texto_relatorio.tag_configure("negrito", font=("Arial", 10, "bold"))
+        self.texto_relatorio.tag_configure("normal", font=("Arial", 10))
+        
+        # Frame para botões de ação
+        frame_acoes = Frame(frame_visualizacao, bg=COR_FUNDO)
+        frame_acoes.pack(fill=X, pady=(5, 0))
         
         # Botão para abrir relatório no Word
-        btn_abrir_word = Button(frame_visualizacao,
-                              text="Abrir no Word",
-                              command=self.abrir_relatorio_word,
-                              bg=COR_SECUNDARIA,
-                              fg="white")
-        btn_abrir_word.pack(side=RIGHT, padx=5, pady=5)
+        btn_abrir_word = Button(frame_acoes,
+                            text="Abrir no Word",
+                            command=self.abrir_relatorio_word,
+                            bg=COR_SECUNDARIA,
+                            fg="white",
+                            font=("Arial", 9, "bold"),
+                            padx=10,
+                            pady=5)
+        btn_abrir_word.pack(side=RIGHT, padx=5)
+        
+        # Botão para copiar relatório
+        btn_copiar = Button(frame_acoes,
+                        text="Copiar Relatório",
+                        command=self.copiar_relatorio,
+                        bg="#607D8B",
+                        fg="white",
+                        font=("Arial", 9, "bold"),
+                        padx=10,
+                        pady=5)
+        btn_copiar.pack(side=RIGHT, padx=5)
+        
+        # Botão para limpar relatório
+        btn_limpar = Button(frame_acoes,
+                        text="Limpar",
+                        command=self.limpar_relatorio,
+                        bg=COR_ALERTA,
+                        fg="white",
+                        font=("Arial", 9, "bold"),
+                        padx=10,
+                        pady=5)
+        btn_limpar.pack(side=RIGHT, padx=5)
     
-    def gerar_relatorio_semanal_interface(self):
+    def _gerar_relatorio_semanal(self):
         """Gera e exibe o relatório semanal na interface"""
         try:
-            caminho = gerar_relatorio_semanal()
+            caminho = self._gerar_relatorio_semanal_docx()
             
-            # Exibir resumo na interface
+            # Limpar a área de texto
+            self.texto_relatorio.delete(1.0, END)
+            
+            # Adicionar cabeçalho personalizado
+            self.adicionar_cabecalho_relatorio("Relatório Semanal")
+            
+            # Exibir conteúdo do relatório com formatação
             with open(caminho, 'rb') as f:
                 doc = Document(f)
-                texto = ""
-                for para in doc.paragraphs:
-                    texto += para.text + "\n"
                 
-                self.texto_relatorio.delete(1.0, END)
-                self.texto_relatorio.insert(1.0, texto)
+                for para in doc.paragraphs:
+                    texto = para.text
+                    estilo = "normal"
+                    
+                    if para.style.name == 'Heading 1':
+                        estilo = "titulo"
+                    elif para.style.name == 'Heading 2':
+                        estilo = "cabecalho"
+                    elif para.style.name == 'Heading 3':
+                        estilo = "subtitulo"
+                    elif any(run.bold for run in para.runs):
+                        estilo = "negrito"
+                    
+                    self.texto_relatorio.insert(END, texto + "\n", estilo)
             
-            messagebox.showinfo("Sucesso", f"Relatório gerado com sucesso!\n{caminho}")
+            messagebox.showinfo("Sucesso", f"Relatório semanal gerado com sucesso!\n{caminho}")
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao gerar relatório: {str(e)}")
-    
+
+    def _gerar_relatorio_mensal(self):
+        """Gera e exibe o relatório mensal na interface"""
+        try:
+            caminho = self._gerar_relatorio_mensal_docx()
+            
+            # Limpar a área de texto
+            self.texto_relatorio.delete(1.0, END)
+            
+            # Adicionar cabeçalho personalizado
+            self.adicionar_cabecalho_relatorio("Relatório Mensal")
+            
+            # Exibir conteúdo do relatório com formatação
+            with open(caminho, 'rb') as f:
+                doc = Document(f)
+                
+                for para in doc.paragraphs:
+                    texto = para.text
+                    estilo = "normal"
+                    
+                    if para.style.name == 'Heading 1':
+                        estilo = "titulo"
+                    elif para.style.name == 'Heading 2':
+                        estilo = "cabecalho"
+                    elif para.style.name == 'Heading 3':
+                        estilo = "subtitulo"
+                    elif any(run.bold for run in para.runs):
+                        estilo = "negrito"
+                    
+                    self.texto_relatorio.insert(END, texto + "\n", estilo)
+            
+            messagebox.showinfo("Sucesso", f"Relatório mensal gerado com sucesso!\n{caminho}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao gerar relatório mensal: {str(e)}")
+
+       
+ 
+    def adicionar_cabecalho_relatorio(self, titulo):
+        """Adiciona um cabeçalho profissional ao relatório"""
+        # Informações da empresa
+        nome_empresa = "GT - Gestão e serviços para espaços locados por temporada"
+        endereco = "Rua dos Imigrantes, 380 - Centro. Pomerode/SC"
+        contato = "santos.gustavoethais@gmail.com | (47) 9 9291-2825"
+        data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
+        
+        # Adicionar cabeçalho formatado
+        self.texto_relatorio.insert(END, nome_empresa + "\n", "titulo")
+        self.texto_relatorio.insert(END, endereco + "\n", "subtitulo")
+        self.texto_relatorio.insert(END, contato + "\n", "subtitulo")
+        self.texto_relatorio.insert(END, "\n" + "="*80 + "\n", "normal")
+        self.texto_relatorio.insert(END, titulo.upper() + "\n", "cabecalho")
+        self.texto_relatorio.insert(END, f"Emitido em: {data_atual}\n", "subtitulo")
+        self.texto_relatorio.insert(END, "="*80 + "\n\n", "normal")
+
+    def _gerar_relatorio_semanal_docx(self):
+        """Gera um relatório semanal profissional em formato DOCX"""
+        conn = sqlite3.connect("sistema.db")
+        cursor = conn.cursor()
+        
+        # Data de início (7 dias atrás)
+        data_inicio = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        data_fim = datetime.now().strftime("%Y-%m-%d")
+        
+        # Criar documento profissional
+        doc = Document()
+        
+        # Estilos personalizados
+        styles = doc.styles
+        style = styles.add_style('CabecalhoEmpresa', WD_STYLE_TYPE.PARAGRAPH)
+        style.font.name = 'Arial'
+        style.font.size = Pt(14)
+        style.font.bold = True
+        style.font.color.rgb = RGBColor(0x2C, 0x3E, 0x50)  # COR_PRIMARIA
+        
+        # Cabeçalho do documento
+        para = doc.add_paragraph("SUA EMPRESA LTDA", style='CabecalhoEmpresa')
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        para = doc.add_paragraph("Relatório Semanal de Serviços", style='Heading 1')
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        doc.add_paragraph(f"Período: {data_inicio} a {data_fim}", style='Heading 2')
+        
+        # Limpezas realizadas
+        doc.add_heading('Limpezas Realizadas', level=1)
+        cursor.execute("""
+            SELECT i.endereco, l.data, l.horas_trabalhadas, l.valor_total 
+            FROM limpezas l
+            JOIN imoveis i ON l.imovel_id = i.id
+            WHERE date(l.data) BETWEEN date(?) AND date(?)
+            ORDER BY l.data
+        """, (data_inicio, data_fim))
+        
+        tabela_limpezas = doc.add_table(rows=1, cols=4, style='Light Shading Accent 1')
+        tabela_limpezas.autofit = True
+        
+        # Cabeçalho da tabela
+        cabecalho = tabela_limpezas.rows[0].cells
+        cabecalho[0].text = 'Imóvel'
+        cabecalho[1].text = 'Data'
+        cabecalho[2].text = 'Horas'
+        cabecalho[3].text = 'Valor'
+        
+        total_horas = 0
+        total_valor = 0
+        
+        for row in cursor.fetchall():
+            linha = tabela_limpezas.add_row().cells
+            linha[0].text = row[0]
+            linha[1].text = row[1]
+            linha[2].text = f"{row[2]:.2f}h"
+            linha[3].text = formatar_moeda(row[3])
+            total_horas += row[2]
+            total_valor += row[3]
+        
+        doc.add_paragraph(f"Total de horas trabalhadas: {total_horas:.2f}h", style='Body Text')
+        doc.add_paragraph(f"Total a receber por limpezas: {formatar_moeda(total_valor)}", style='Body Text')
+        
+        # Restante da implementação do relatório...
+        # ... (manter o restante do código de geração do relatório)
+
+        # Salvar documento
+        os.makedirs("relatorios", exist_ok=True)
+        nome_arquivo = f"relatorios/Relatorio_Semanal_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+        doc.save(nome_arquivo)
+        conn.close()
+        
+        return nome_arquivo
+
+# Adicione os outros métodos auxiliares (adicionar_cabecalho_relatorio, abrir_relatorio_word, etc.)
+
     def abrir_relatorio_word(self):
         """Abre o último relatório gerado no Word"""
         try:
-            # Buscar o arquivo mais recente na pasta de relatórios
             arquivos = [f for f in os.listdir("relatorios") if f.endswith(".docx")]
             if arquivos:
                 arquivos.sort(reverse=True)
                 caminho = os.path.join("relatorios", arquivos[0])
-                webbrowser.open(caminho)
+                os.startfile(caminho)  # Abre com o programa padrão
             else:
                 messagebox.showwarning("Aviso", "Nenhum relatório encontrado na pasta 'relatorios'")
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível abrir o relatório: {str(e)}")
+
+    def exportar_para_pdf(self):
+        """Exporta o relatório atual para PDF"""
+        try:
+            # Implemente a conversão para PDF aqui
+            # Pode usar bibliotecas como python-docx para DOCX para PDF
+            messagebox.showinfo("Em desenvolvimento", "Funcionalidade de exportar para PDF será implementada em breve")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar para PDF: {str(e)}")
+
+    def copiar_relatorio(self):
+        """Copia o conteúdo do relatório para a área de transferência"""
+        try:
+            conteudo = self.texto_relatorio.get(1.0, END)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(conteudo)
+            messagebox.showinfo("Sucesso", "Relatório copiado para a área de transferência!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao copiar relatório: {str(e)}")
+
+    def limpar_relatorio(self):
+        """Limpa a área de visualização do relatório"""
+        self.texto_relatorio.delete(1.0, END)
+
+        # =======FECHAMENTO DE CONTAS=========))
+
+    def _construir_aba_fechamento(self, frame, tipo):
+        """Constrói a interface de fechamento de contas para imóvel ou cliente"""
+
+        label_titulo = Label(frame, text=f"Fechamento por {tipo.title()}", font=("Arial", 12, "bold"), bg=COR_FUNDO)
+        label_titulo.pack(pady=10)
+
+        frame_form = Frame(frame, bg=COR_FUNDO)
+        frame_form.pack(fill=X, padx=10, pady=5)
+
+        # Combobox com imóveis ou clientes
+        label_item = Label(frame_form, text=f"{'Imóvel' if tipo == 'imovel' else 'Cliente'}:", bg=COR_FUNDO)
+        label_item.grid(row=0, column=0, sticky=W)
+
+        combo = ttk.Combobox(frame_form, state="readonly", width=50)
+        combo.grid(row=0, column=1, padx=5)
+        setattr(self, f"combo_fechamento_{tipo}", combo)
+
+        # Datas
+        label_inicio = Label(frame_form, text="Data Início:", bg=COR_FUNDO)
+        label_inicio.grid(row=1, column=0, sticky=W)
+
+        entry_inicio = DateEntry(frame_form, width=12, locale='pt_BR')
+        entry_inicio.grid(row=1, column=1, sticky=W, padx=5)
+        setattr(self, f"entry_data_inicio_{tipo}", entry_inicio)
+
+        label_fim = Label(frame_form, text="Data Fim:", bg=COR_FUNDO)
+        label_fim.grid(row=2, column=0, sticky=W)
+
+        entry_fim = DateEntry(frame_form, width=12, locale='pt_BR')
+        entry_fim.grid(row=2, column=1, sticky=W, padx=5)
+        setattr(self, f"entry_data_fim_{tipo}", entry_fim)
+
+        # Botões
+        frame_botoes = Frame(frame, bg=COR_FUNDO)
+        frame_botoes.pack(pady=5)
+
+        Button(frame_botoes, text="Gerar Resumo", command=lambda: self.gerar_resumo_fechamento(tipo)).pack(side=LEFT, padx=5)
+        Button(frame_botoes, text="Fechar Contas", command=lambda: self.gerar_fechamento(tipo)).pack(side=LEFT, padx=5)
+        Button(frame_botoes, text="Limpar", command=lambda: self.limpar_form_fechamento(tipo)).pack(side=LEFT, padx=5)
+
+        # Label de resumo
+        label_resumo = Label(frame, text="Selecione um item e o período para ver o resumo", bg=COR_FUNDO, justify=LEFT, anchor=W)
+        label_resumo.pack(fill=X, padx=10, pady=10)
+        setattr(self, f"label_resumo_{tipo}", label_resumo)
+
+        # Carrega os itens iniciais no combobox
+        self.carregar_itens_fechamento(tipo)
+    # Adiciona ao menu lateral (no método criar_menu_lateral())
+    # Adicione esta linha à lista de módulos:
+    # ("Fechar Contas", "fechamento"),
+
+    def _construir_aba_fechamento(self, parent_frame, tipo):
+        """Método auxiliar para construir a interface de fechamento"""
+        # Frame para seleção
+        frame_selecao = Frame(parent_frame, bg=COR_CARD, padx=10, pady=10)
+        frame_selecao.pack(fill=X)
+        
+        Label(frame_selecao, text=f"Selecione o {'Imóvel' if tipo == 'imovel' else 'Cliente'}:", 
+            bg=COR_CARD).pack(side=LEFT, padx=5)
+        
+        setattr(self, f"combo_fechamento_{tipo}", ttk.Combobox(frame_selecao))
+        getattr(self, f"combo_fechamento_{tipo}").pack(side=LEFT, expand=True, fill=X, padx=5)
+    
+        # Frame para período
+        frame_periodo = Frame(parent_frame, bg=COR_CARD, padx=10, pady=10)
+        frame_periodo.pack(fill=X)
+        
+        Label(frame_periodo, text="Período:", bg=COR_CARD).grid(row=0, column=0, sticky='e', padx=5)
+        Label(frame_periodo, text="De:", bg=COR_CARD).grid(row=0, column=1, sticky='e', padx=5)
+        setattr(self, f"entry_data_inicio_{tipo}", DateEntry(frame_periodo, date_pattern='dd/mm/yyyy'))
+        getattr(self, f"entry_data_inicio_{tipo}").grid(row=0, column=2, padx=5)
+        Label(frame_periodo, text="Até:", bg=COR_CARD).grid(row=0, column=3, sticky='e', padx=5)
+        setattr(self, f"entry_data_fim_{tipo}", DateEntry(frame_periodo, date_pattern='dd/mm/yyyy'))
+        getattr(self, f"entry_data_fim_{tipo}").grid(row=0, column=4, padx=5)
+        
+        # Frame para resumo
+        frame_resumo = Frame(parent_frame, bg=COR_FUNDO)
+        frame_resumo.pack(fill=X, padx=10, pady=5)
+        label_resumo = Label(frame_resumo, text="Selecione um item e o período para ver o resumo", bg=COR_FUNDO, justify=LEFT, anchor=W)
+        label_resumo.pack(fill=X)
+        setattr(self, f"label_resumo_{tipo}", label_resumo)
+
+        # Frame para botões
+        frame_botoes = Frame(parent_frame, bg=COR_CARD, padx=10, pady=10)
+        frame_botoes.pack(fill=X)
+        
+        Button(frame_botoes, text="Gerar Resumo", 
+            command=lambda: self.gerar_resumo_fechamento(tipo),
+            bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
+        
+        Button(frame_botoes, text="Gerar Fechamento", 
+            command=lambda: self.gerar_fechamento(tipo),
+            bg=COR_SUCESSO, fg="white").pack(side=LEFT, padx=5)
+        
+        Button(frame_botoes, text="Limpar", 
+            command=lambda: self.limpar_form_fechamento(tipo),
+            bg=COR_SECUNDARIA, fg="white").pack(side=LEFT, padx=5)
+        
+        # Carrega os itens no combobox
+        self.carregar_itens_fechamento(tipo)
+
+    def carregar_itens_fechamento(self, tipo):
+        """Carrega imóveis ou clientes no combobox correspondente ao tipo"""
+        conn = sqlite3.connect("sistema.db")
+        cursor = conn.cursor()
+        
+        if tipo == "imovel":
+            cursor.execute("SELECT id, endereco FROM imoveis")
+            itens = [f"{row[0]} - {row[1]}" for row in cursor.fetchall()]
+        else:
+            cursor.execute("SELECT id, nome FROM clientes")
+            itens = [f"{row[0]} - {row[1]}" for row in cursor.fetchall()]
+        
+        combo = getattr(self, f"combo_fechamento_{tipo}", None)
+        if combo:
+            combo['values'] = itens
+            if itens:
+                combo.current(0)
+        
+        conn.close()
+
+
+    def gerar_resumo_fechamento(self, tipo):
+        """Gera um resumo dos valores a receber"""
+        try:
+            combo = getattr(self, f"combo_fechamento_{tipo}")
+            entry_inicio = getattr(self, f"entry_data_inicio_{tipo}")
+            entry_fim = getattr(self, f"entry_data_fim_{tipo}")
+            label_resumo = getattr(self, f"label_resumo_{tipo}")
+
+            item = combo.get()
+            if not item:
+                raise ValueError("Selecione um item")
+                    
+            item_id = item.split(" - ")[0]
+            data_inicio = entry_inicio.get_date()
+            data_fim = entry_fim.get_date()
+                        
+            if data_inicio > data_fim:
+                    raise ValueError("Data inicial deve ser anterior à data final")
+                    
+            conn = sqlite3.connect("sistema.db")
+            cursor = conn.cursor()
+                
+                # Calcula totais
+            if tipo == "imovel":
+                    # Limpezas
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(valor_total), 0) 
+                        FROM limpezas 
+                        WHERE imovel_id = ? AND date(data) BETWEEN ? AND ?
+                    """, (item_id, data_inicio, data_fim))
+                    total_limpezas = cursor.fetchone()[0]
+                    
+                    # Enxoval
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(t.preco_unitario * c.quantidade), 0)
+                        FROM consumo_enxoval c
+                        JOIN tipos_enxoval t ON c.item_id = t.id
+                        WHERE c.imovel_id = ? AND date(c.data) BETWEEN ? AND ?
+                    """, (item_id, data_inicio, data_fim))
+                    total_enxoval = cursor.fetchone()[0]
+                    
+                    # Suprimentos
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(valor_gasto), 0)
+                        FROM reposicao_suprimentos
+                        WHERE imovel_id = ? AND date(data) BETWEEN ? AND ?
+                    """, (item_id, data_inicio, data_fim))
+                    total_suprimentos = cursor.fetchone()[0]
+                    
+                    # Valor fixo por gestão (considerando 1 imóvel)
+                    valor_gestao = 50.0
+                    
+                    resumo = f"""
+                        RESUMO PARA O IMÓVEL: {item}
+                        Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}
+
+                        - Limpezas: {formatar_moeda(total_limpezas)}
+                        - Enxoval: {formatar_moeda(total_enxoval)}
+                        - Suprimentos: {formatar_moeda(total_suprimentos)}
+                        - Gestão: {formatar_moeda(valor_gestao)}
+                        ---------------------------
+                        TOTAL: {formatar_moeda(total_limpezas + total_enxoval + total_suprimentos + valor_gestao)}
+                        """
+            else:
+                    # Para cliente, somamos todos os imóveis dele
+                    cursor.execute("SELECT id FROM imoveis WHERE cliente_id = ?", (item_id,))
+                    imoveis_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    if not imoveis_ids:
+                        raise ValueError("Este cliente não possui imóveis cadastrados")
+                        
+                    # Limpezas
+                    cursor.execute(f"""
+                        SELECT COALESCE(SUM(valor_total), 0) 
+                        FROM limpezas 
+                        WHERE imovel_id IN ({','.join(['?']*len(imoveis_ids))}) 
+                        AND date(data) BETWEEN ? AND ?
+                    """, (*imoveis_ids, data_inicio, data_fim))
+                    total_limpezas = cursor.fetchone()[0]
+                    
+                    # Enxoval
+                    cursor.execute(f"""
+                        SELECT COALESCE(SUM(t.preco_unitario * c.quantidade), 0)
+                        FROM consumo_enxoval c
+                        JOIN tipos_enxoval t ON c.item_id = t.id
+                        WHERE c.imovel_id IN ({','.join(['?']*len(imoveis_ids))})
+                        AND date(c.data) BETWEEN ? AND ?
+                    """, (*imoveis_ids, data_inicio, data_fim))
+                    total_enxoval = cursor.fetchone()[0]
+                    
+                    # Suprimentos
+                    cursor.execute(f"""
+                        SELECT COALESCE(SUM(valor_gasto), 0)
+                        FROM reposicao_suprimentos
+                        WHERE imovel_id IN ({','.join(['?']*len(imoveis_ids))})
+                        AND date(data) BETWEEN ? AND ?
+                    """, (*imoveis_ids, data_inicio, data_fim))
+                    total_suprimentos = cursor.fetchone()[0]
+                    
+                    # Valor fixo por gestão (por imóvel)
+                    valor_gestao = 50.0 * len(imoveis_ids)
+                    
+                    resumo = f"""
+                    RESUMO PARA O CLIENTE: {item}
+                    Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}
+                    Imóveis: {len(imoveis_ids)}
+
+                    - Limpezas: {formatar_moeda(total_limpezas)}
+                    - Enxoval: {formatar_moeda(total_enxoval)}
+                    - Suprimentos: {formatar_moeda(total_suprimentos)}
+                    - Gestão: {formatar_moeda(valor_gestao)}
+                    ---------------------------
+                    TOTAL: {formatar_moeda(total_limpezas + total_enxoval + total_suprimentos + valor_gestao)}
+                    """
+                
+            self.label_resumo.config(text=resumo)
+            conn.close()
+                
+        except ValueError as e:
+                messagebox.showerror("Erro", str(e))
+        except Exception as e:
+                messagebox.showerror("Erro", f"Ocorreu um erro ao gerar o resumo:\n{str(e)}")     
+
+
+    def gerar_fechamento(self, tipo):
+        """Registra o fechamento no banco de dados"""
+        try:
+            # Widgets dinâmicos conforme o tipo (imovel ou cliente)
+            combo = getattr(self, f"combo_fechamento_{tipo}")
+            entry_inicio = getattr(self, f"entry_data_inicio_{tipo}")
+            entry_fim = getattr(self, f"entry_data_fim_{tipo}")
+            label_resumo = getattr(self, f"label_resumo_{tipo}")
+
+            item = combo.get()
+            if not item:
+                raise ValueError("Selecione um item")
+            
+            item_id = item.split(" - ")[0]
+            data_inicio = entry_inicio.get_date()
+            data_fim = entry_fim.get_date()
+            
+            if data_inicio > data_fim:
+                raise ValueError("Data inicial deve ser anterior à data final")
+            
+            # Confirmação do usuário
+            confirmacao = messagebox.askyesno(
+                "Confirmar Fechamento",
+                f"Tem certeza que deseja fechar as contas deste {'imóvel' if tipo == 'imovel' else 'cliente'} "
+                f"no período de {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}?"
+            )
+            if not confirmacao:
+                return
+
+            conn = sqlite3.connect("sistema.db")
+            cursor = conn.cursor()
+
+            if tipo == "imovel":
+                # Limpezas
+                cursor.execute("""
+                    SELECT COALESCE(SUM(valor_total), 0) 
+                    FROM limpezas 
+                    WHERE imovel_id = ? AND date(data) BETWEEN ? AND ?
+                """, (item_id, data_inicio, data_fim))
+                total_limpezas = cursor.fetchone()[0]
+
+                # Enxoval
+                cursor.execute("""
+                    SELECT COALESCE(SUM(t.preco_unitario * c.quantidade), 0)
+                    FROM consumo_enxoval c
+                    JOIN tipos_enxoval t ON c.item_id = t.id
+                    WHERE c.imovel_id = ? AND date(c.data) BETWEEN ? AND ?
+                """, (item_id, data_inicio, data_fim))
+                total_enxoval = cursor.fetchone()[0]
+
+                # Suprimentos
+                cursor.execute("""
+                    SELECT COALESCE(SUM(valor_gasto), 0)
+                    FROM reposicao_suprimentos
+                    WHERE imovel_id = ? AND date(data) BETWEEN ? AND ?
+                """, (item_id, data_inicio, data_fim))
+                total_suprimentos = cursor.fetchone()[0]
+
+                valor_gestao = 50.0
+                valor_total = total_limpezas + total_enxoval + total_suprimentos + valor_gestao
+
+            else:  # cliente
+                cursor.execute("SELECT id FROM imoveis WHERE cliente_id = ?", (item_id,))
+                imoveis_ids = [row[0] for row in cursor.fetchall()]
+
+                if not imoveis_ids:
+                    raise ValueError("Este cliente não possui imóveis cadastrados")
+
+                q_marks = ','.join(['?'] * len(imoveis_ids))
+
+                # Limpezas
+                cursor.execute(f"""
+                    SELECT COALESCE(SUM(valor_total), 0) 
+                    FROM limpezas 
+                    WHERE imovel_id IN ({q_marks}) AND date(data) BETWEEN ? AND ?
+                """, (*imoveis_ids, data_inicio, data_fim))
+                total_limpezas = cursor.fetchone()[0]
+
+                # Enxoval
+                cursor.execute(f"""
+                    SELECT COALESCE(SUM(t.preco_unitario * c.quantidade), 0)
+                    FROM consumo_enxoval c
+                    JOIN tipos_enxoval t ON c.item_id = t.id
+                    WHERE c.imovel_id IN ({q_marks}) AND date(c.data) BETWEEN ? AND ?
+                """, (*imoveis_ids, data_inicio, data_fim))
+                total_enxoval = cursor.fetchone()[0]
+
+                # Suprimentos
+                cursor.execute(f"""
+                    SELECT COALESCE(SUM(valor_gasto), 0)
+                    FROM reposicao_suprimentos
+                    WHERE imovel_id IN ({q_marks}) AND date(data) BETWEEN ? AND ?
+                """, (*imoveis_ids, data_inicio, data_fim))
+                total_suprimentos = cursor.fetchone()[0]
+
+                valor_gestao = 50.0 * len(imoveis_ids)
+                valor_total = total_limpezas + total_enxoval + total_suprimentos + valor_gestao
+
+            # Pergunta sobre comprovante
+            comprovante = None
+            if messagebox.askyesno("Comprovante", "Deseja anexar um comprovante de pagamento?"):
+                caminho = filedialog.askopenfilename()
+                if caminho:
+                    nome_arquivo = os.path.basename(caminho)
+                    destino = os.path.join("comprovantes", nome_arquivo)
+                    os.makedirs("comprovantes", exist_ok=True)  # garante que a pasta existe
+                    os.replace(caminho, destino)
+                    comprovante = destino
+
+            # Salva o fechamento
+            cursor.execute("""
+                INSERT INTO fechamentos 
+                (tipo, referencia_id, data_inicio, data_fim, valor_total, comprovante_path)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (tipo, item_id, data_inicio, data_fim, valor_total, comprovante))
+
+            conn.commit()
+            conn.close()
+
+            messagebox.showinfo("Sucesso", f"Fechamento registrado com sucesso!\nTotal: {formatar_moeda(valor_total)}")
+            self.limpar_form_fechamento(tipo)
+
+        except ValueError as e:
+            messagebox.showerror("Erro", str(e))
+        except Exception as e:
+            messagebox.showerror("Erro", f"Ocorreu um erro ao registrar o fechamento:\n{str(e)}")
+
+            
+
+    def limpar_form_fechamento(self, tipo):
+        """Limpa o formulário de fechamento (cliente ou imóvel)"""
+
+        # Acessa os widgets dinamicamente com base no tipo
+        combo = getattr(self, f"combo_fechamento_{tipo}")
+        entry_inicio = getattr(self, f"entry_data_inicio_{tipo}")
+        entry_fim = getattr(self, f"entry_data_fim_{tipo}")
+        label_resumo = getattr(self, f"label_resumo_{tipo}")
+
+        # Limpa o combobox
+        combo.set('')
+
+        # Define datas padrão: últimos 30 dias
+        hoje = datetime.now().date()
+        entry_inicio.set_date(hoje - timedelta(days=30))
+        entry_fim.set_date(hoje)
+
+        # Limpa o texto do resumo
+        label_resumo.config(text="Selecione um item e o período para ver o resumo")
+
+
+
+    def criar_historico_fechamentos(self):
+        """Cria a interface para visualizar fechamentos anteriores"""
+        self.frame_historico_fechamentos = Frame(self.frame_conteudo, bg=COR_FUNDO)
+        
+        # Treeview para listar fechamentos
+        frame_tree = Frame(self.frame_historico_fechamentos, bg=COR_FUNDO)
+        frame_tree.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        
+        scrollbar = Scrollbar(frame_tree)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        
+        self.tree_fechamentos = ttk.Treeview(frame_tree, 
+                                        columns=('id', 'tipo', 'referencia', 'periodo', 'valor', 'data_fechamento'),
+                                        yscrollcommand=scrollbar.set)
+        self.tree_fechamentos.pack(fill=BOTH, expand=True)
+        scrollbar.config(command=self.tree_fechamentos.yview)
+        
+        self.tree_fechamentos.heading('#0', text='ID')
+        self.tree_fechamentos.heading('#1', text='Tipo')
+        self.tree_fechamentos.heading('#2', text='Referência')
+        self.tree_fechamentos.heading('#3', text='Período')
+        self.tree_fechamentos.heading('#4', text='Valor')
+        self.tree_fechamentos.heading('#5', text='Data Fechamento')
+        
+        # Botão para atualizar
+        frame_botoes = Frame(self.frame_historico_fechamentos, bg=COR_FUNDO, padx=10, pady=10)
+        frame_botoes.pack(fill=X)
+        
+        Button(frame_botoes, text="Atualizar", command=self.carregar_fechamentos,
+            bg=COR_DESTAQUE, fg="white").pack(side=LEFT, padx=5)
+        
+        # Carrega os fechamentos
+        self.carregar_fechamentos()
+
+
+    def carregar_fechamentos(self):
+        """Carrega os fechamentos no TreeView"""
+        conn = sqlite3.connect("sistema.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT f.id, f.tipo, 
+                CASE 
+                    WHEN f.tipo = 'imovel' THEN i.endereco
+                    ELSE c.nome
+                END as referencia,
+                f.data_inicio || ' a ' || f.data_fim as periodo,
+                f.valor_total, f.data_fechamento
+            FROM fechamentos f
+            LEFT JOIN imoveis i ON f.tipo = 'imovel' AND f.referencia_id = i.id
+            LEFT JOIN clientes c ON f.tipo = 'cliente' AND f.referencia_id = c.id
+            ORDER BY f.data_fechamento DESC
+        """)
+        
+        # Limpar treeview
+        for item in self.tree_fechamentos.get_children():
+            self.tree_fechamentos.delete(item)
+        
+        # Adicionar novos itens formatados
+        for row in cursor.fetchall():
+            self.tree_fechamentos.insert('', 'end', values=(
+                row[0], 
+                "Imóvel" if row[1] == "imovel" else "Cliente",
+                row[2], 
+                row[3], 
+                formatar_moeda(row[4]), 
+                row[5]
+            ))
+        
+        conn.close()
+
+
+    def criar_fechamento_contas(self):
+        """Cria a interface para o módulo Fechamento de Contas"""
+        self.frame_fechamento = Frame(self.frame_conteudo, bg=COR_FUNDO)
+        abas = ttk.Notebook(self.frame_fechamento)
+        frame_imovel = Frame(abas, bg=COR_FUNDO)
+        frame_cliente = Frame(abas, bg=COR_FUNDO)
+        abas.add(frame_imovel, text="Por Imóvel")
+        abas.add(frame_cliente, text="Por Cliente")
+        abas.pack(fill=BOTH, expand=True)
+        # Constrói as abas usando seu método auxiliar
+        self._construir_aba_fechamento(frame_imovel, "imovel")
+        self._construir_aba_fechamento(frame_cliente, "cliente")
+
+
 
 # =============================================
 # INICIALIZAÇÃO DO SISTEMA
